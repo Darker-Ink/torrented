@@ -1,0 +1,38 @@
+[package]
+name = "torrented"
+version = "0.1.0"
+edition = "2024"
+description = "Self-hosted streaming library for your own torrents"
+license = "MIT"
+
+[dependencies]
+anyhow = "1"
+argon2 = { version = "0.5", features = ["std"] }
+async-stream = "0.3"
+axum = { version = "0.8", features = ["macros", "multipart"] }
+axum-extra = { version = "0.10", features = ["cookie", "typed-header"] }
+base64 = "0.22"
+bytes = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock", "serde", "std"] }
+clap = { version = "4", features = ["derive", "env"] }
+dashmap = "6"
+futures = "0.3"
+hex = "0.4"
+librqbit = { version = "9.0.1", default-features = false, features = ["rust-tls"] }
+mime_guess = "2"
+rand = "0.9"
+regex = "1"
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls", "query"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite", "macros", "migrate", "chrono", "json"] }
+thiserror = "2"
+tokio = { version = "1", features = ["full"] }
+tokio-util = { version = "0.7", features = ["io"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["fs", "trace", "cors", "compression-gzip"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+url = "2"
+urlencoding = "2"
