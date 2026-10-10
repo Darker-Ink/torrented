@@ -157,6 +157,32 @@ impl MediaTools {
         cmd.spawn().context("starting ffmpeg")
     }
 
+    /// Extract an embedded text subtitle track between `start` and `end`
+    /// seconds as WebVTT with absolute timestamps. Only that part of the file
+    /// is read.
+    pub async fn extract_subtitles(&self, url: &str, track: usize, start: f64, end: f64) -> anyhow::Result<String> {
+        let bin = self.ffmpeg.as_deref().context("ffmpeg is not available")?;
+        let child = Command::new(bin)
+            .args(["-hide_banner", "-loglevel", "error", "-nostdin"])
+            .args(["-ss", &format!("{start:.3}")])
+            .args(["-i", url])
+            .args(["-to", &format!("{end:.3}")])
+            .args(["-map", &format!("0:s:{track}"), "-copyts", "-f", "webvtt", "pipe:1"])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
+            .context("starting ffmpeg")?;
+        let out = tokio::time::timeout(Duration::from_secs(180), child.wait_with_output())
+            .await
+            .map_err(|_| anyhow::anyhow!("timed out reading subtitles from the swarm"))??;
+        if !out.status.success() {
+            let err = String::from_utf8_lossy(&out.stderr).replace(url, "input");
+            bail!("could not extract subtitles: {}", err.trim());
+        }
+        Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+    }
+
     /// Convert a subtitle file (ass/ssa/sub…) to WebVTT.
     pub async fn subtitle_to_vtt(&self, input: Vec<u8>, ext: &str) -> anyhow::Result<String> {
         use tokio::io::AsyncWriteExt;
@@ -197,6 +223,15 @@ pub struct AudioTrack {
     pub language: Option<String>,
     pub title: Option<String>,
     pub default: bool,
+}
+
+/// Subtitle codecs that can be turned into WebVTT. Bitmap formats (PGS,
+/// VobSub, DVB) would need OCR.
+pub fn is_text_subtitle(codec: Option<&str>) -> bool {
+    matches!(
+        codec,
+        Some("subrip" | "srt" | "ass" | "ssa" | "webvtt" | "mov_text" | "text" | "microdvd")
+    )
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

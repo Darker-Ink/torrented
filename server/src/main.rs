@@ -76,6 +76,7 @@ async fn main() -> anyhow::Result<()> {
         engine: engine.clone(),
         tools,
         internal_key: util::random_token(32),
+        stream_tokens: Default::default(),
         started_at: Instant::now(),
     });
 

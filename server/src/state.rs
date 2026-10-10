@@ -21,7 +21,17 @@ pub struct Inner {
     /// Random key that lets local helper processes (ffmpeg/ffprobe) read the
     /// raw stream endpoint without a user session.
     pub internal_key: String,
+    /// Short-lived tokens that let devices without a session (Chromecast)
+    /// read one torrent's files.
+    pub stream_tokens: dashmap::DashMap<String, StreamToken>,
     pub started_at: Instant,
+}
+
+#[derive(Debug, Clone)]
+pub struct StreamToken {
+    pub user_id: i64,
+    pub torrent_id: i64,
+    pub expires: Instant,
 }
 
 impl AppState {

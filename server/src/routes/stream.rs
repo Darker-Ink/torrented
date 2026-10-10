@@ -6,11 +6,13 @@ use std::sync::{
 use axum::{
     Json, Router,
     body::Body,
-    extract::{Path, Query, State},
-    http::{HeaderMap, StatusCode, header},
+    extract::{FromRequestParts, Path, Query, State},
+    http::{HeaderMap, Method, StatusCode, header, request::Parts},
     response::{IntoResponse, Response},
-    routing::get,
+    routing::{get, post},
 };
+use std::time::Instant;
+use tower_http::cors::{Any, CorsLayer};
 use bytes::Bytes;
 use chrono::Utc;
 use serde::Deserialize;
@@ -19,26 +21,106 @@ use tokio::io::AsyncReadExt;
 use tokio_util::io::ReaderStream;
 
 use crate::{
-    auth::{ClientInfo, CurrentUser, User, perm},
+    auth::{ClientInfo, CurrentUser, USER_COLUMNS, User, perm},
     error::{AppError, AppResult},
     library::files::{self, FileContext},
-    state::{AppState, PROBE_READAHEAD, StreamPurpose},
+    state::{AppState, PROBE_READAHEAD, StreamPurpose, StreamToken},
     streaming::{
         self, CountingStream,
         ffmpeg::{self, ClientCaps, PlaybackMode, ProbeResult, TranscodeOptions},
         subtitles,
     },
     torrents::{engine::Lease, parser, scan},
+    util,
 };
 
 pub fn router() -> Router<AppState> {
+    // Cast receivers fetch media and captions cross-origin; access is
+    // controlled by the session cookie or a per-torrent token, never by CORS.
+    let cors = CorsLayer::new()
+        .allow_origin(Any)
+        .allow_methods([Method::GET, Method::HEAD])
+        .allow_headers(Any)
+        .expose_headers([header::CONTENT_RANGE, header::CONTENT_LENGTH, header::ACCEPT_RANGES]);
     Router::new()
         .route("/play/{file_id}", get(play))
+        .route("/play/{file_id}/cast", post(cast_token))
         .route("/stream/{file_id}", get(stream_direct))
         .route("/stream/{file_id}/transcode", get(stream_transcode))
         .route("/stream/{file_id}/vtt", get(subtitle_vtt))
+        .route("/stream/{file_id}/subs/{track}", get(embedded_subtitles))
         .route("/stream/{file_id}/status", get(status))
         .route("/internal/files/{file_id}/raw", get(internal_raw))
+        .layer(cors)
+}
+
+/// A signed-in user, or a device holding a stream token for one torrent.
+struct StreamAccess {
+    user: User,
+    torrent_id: Option<i64>,
+}
+
+impl StreamAccess {
+    fn check(&self, ctx: &FileContext) -> AppResult<()> {
+        self.user.require(perm::STREAM)?;
+        match self.torrent_id {
+            Some(t) if t != ctx.torrent_id => Err(AppError::forbidden("this link is for a different title")),
+            _ => Ok(()),
+        }
+    }
+}
+
+impl FromRequestParts<AppState> for StreamAccess {
+    type Rejection = AppError;
+
+    async fn from_request_parts(parts: &mut Parts, state: &AppState) -> Result<Self, Self::Rejection> {
+        let token = parts.uri.query().and_then(|q| {
+            url::form_urlencoded::parse(q.as_bytes())
+                .find(|(k, _)| k == "token")
+                .map(|(_, v)| v.into_owned())
+        });
+        if let Some(token) = token {
+            let grant = state
+                .stream_tokens
+                .get(&token)
+                .map(|g| g.clone())
+                .filter(|g| g.expires > Instant::now())
+                .ok_or(AppError::Unauthorized)?;
+            let user: User = sqlx::query_as(&format!(
+                "SELECT {USER_COLUMNS} FROM users WHERE id = ? AND disabled = 0"
+            ))
+            .bind(grant.user_id)
+            .fetch_optional(&state.main)
+            .await?
+            .ok_or(AppError::Unauthorized)?;
+            return Ok(Self { user, torrent_id: Some(grant.torrent_id) });
+        }
+        let CurrentUser(user) = CurrentUser::from_request_parts(parts, state).await?;
+        Ok(Self { user, torrent_id: None })
+    }
+}
+
+/// Hand out a token so a cast device can stream this file (and its
+/// subtitles) without a session. Valid for 12 hours.
+async fn cast_token(
+    State(state): State<AppState>,
+    CurrentUser(user): CurrentUser,
+    Path(file_id): Path<i64>,
+) -> AppResult<Json<Value>> {
+    user.require(perm::STREAM)?;
+    let ctx = context(&state, file_id).await?;
+    let now = Instant::now();
+    state.stream_tokens.retain(|_, g| g.expires > now);
+    let token = util::random_token(24);
+    state.stream_tokens.insert(
+        token.clone(),
+        StreamToken {
+            user_id: user.id,
+            torrent_id: ctx.torrent_id,
+            expires: now + std::time::Duration::from_secs(12 * 3600),
+        },
+    );
+    Ok(Json(json!({ "token": token })))
 }
 
 async fn context(state: &AppState, file_id: i64) -> AppResult<FileContext> {
@@ -128,14 +210,14 @@ async fn own_session(state: &AppState, user: &User, sid: Option<i64>) -> AppResu
 
 async fn stream_direct(
     State(state): State<AppState>,
-    CurrentUser(user): CurrentUser,
+    access: StreamAccess,
     Path(file_id): Path<i64>,
     Query(q): Query<SessionQuery>,
     headers: HeaderMap,
 ) -> AppResult<Response> {
-    user.require(perm::STREAM)?;
     let ctx = context(&state, file_id).await?;
-    let sid = own_session(&state, &user, q.sid).await?;
+    access.check(&ctx)?;
+    let sid = own_session(&state, &access.user, q.sid).await?;
     let readahead = state.settings.readahead_bytes().await;
     serve_file(&state, &ctx, &headers, sid, readahead).await
 }
@@ -188,16 +270,16 @@ fn stored_probe(ctx: &FileContext) -> Option<ProbeResult> {
 
 async fn stream_transcode(
     State(state): State<AppState>,
-    CurrentUser(user): CurrentUser,
+    access: StreamAccess,
     Path(file_id): Path<i64>,
     Query(q): Query<TranscodeQuery>,
 ) -> AppResult<Response> {
-    user.require(perm::STREAM)?;
     if !state.tools.can_transcode() {
         return Err(AppError::bad_request("ffmpeg is not installed on the server"));
     }
     let ctx = context(&state, file_id).await?;
-    let sid = own_session(&state, &user, q.sid).await?;
+    access.check(&ctx)?;
+    let sid = own_session(&state, &access.user, q.sid).await?;
     let probe = stored_probe(&ctx);
     let ext = parser::extension(&ctx.path).unwrap_or_default();
     let caps = ClientCaps { hevc: q.hevc, ac3: q.ac3, mkv: false };
@@ -244,11 +326,11 @@ async fn stream_transcode(
 
 async fn subtitle_vtt(
     State(state): State<AppState>,
-    CurrentUser(user): CurrentUser,
+    access: StreamAccess,
     Path(file_id): Path<i64>,
 ) -> AppResult<Response> {
-    user.require(perm::STREAM)?;
     let ctx = context(&state, file_id).await?;
+    access.check(&ctx)?;
     if ctx.kind != "subtitle" {
         return Err(AppError::bad_request("not a subtitle file"));
     }
@@ -283,6 +365,50 @@ async fn subtitle_vtt(
         _ => return Err(AppError::bad_request("unsupported subtitle format")),
     };
     Ok(([(header::CONTENT_TYPE, "text/vtt; charset=utf-8")], vtt).into_response())
+}
+
+#[derive(Deserialize)]
+struct SubsQuery {
+    start: f64,
+    end: f64,
+}
+
+/// One window of an embedded subtitle track as WebVTT. The player asks for
+/// the part around the playhead, so only that region of the file is read.
+async fn embedded_subtitles(
+    State(state): State<AppState>,
+    access: StreamAccess,
+    Path((file_id, track)): Path<(i64, usize)>,
+    Query(q): Query<SubsQuery>,
+) -> AppResult<Response> {
+    let ctx = context(&state, file_id).await?;
+    access.check(&ctx)?;
+    if !state.tools.can_transcode() {
+        return Err(AppError::bad_request("ffmpeg is not installed on the server"));
+    }
+    let probe = stored_probe(&ctx).ok_or_else(|| AppError::bad_request("file hasn't been scanned yet"))?;
+    let info = probe
+        .subtitles
+        .get(track)
+        .ok_or_else(|| AppError::not_found("no such subtitle track"))?;
+    if !ffmpeg::is_text_subtitle(info.codec.as_deref()) {
+        return Err(AppError::bad_request("image-based subtitles can't be shown in the browser"));
+    }
+    let start = q.start.max(0.0);
+    let end = q.end.max(start + 1.0).min(start + 600.0);
+    let vtt = state
+        .tools
+        .extract_subtitles(&state.internal_stream_url(file_id, StreamPurpose::Probe), track, start, end)
+        .await
+        .map_err(|e| AppError::Upstream(format!("{e:#}")))?;
+    Ok((
+        [
+            (header::CONTENT_TYPE, "text/vtt; charset=utf-8"),
+            (header::CACHE_CONTROL, "private, max-age=3600"),
+        ],
+        vtt,
+    )
+        .into_response())
 }
 
 async fn status(
@@ -373,7 +499,8 @@ async fn subtitles_for(state: &AppState, ctx: &FileContext) -> AppResult<Vec<Val
             None => stem(&s.path),
         };
         out.push(json!({
-            "file_id": s.id,
+            "id": format!("file-{}", s.id),
+            "embedded": false,
             "language": s.language,
             "label": label,
             "url": format!("/api/stream/{}/vtt", s.id),
@@ -512,7 +639,66 @@ async fn play(
     };
 
     let media = crate::library::get_media(&state.media, ctx.media_id).await?;
-    let subtitles = subtitles_for(&state, &ctx).await?;
+    let mut subtitles = subtitles_for(&state, &ctx).await?;
+    if state.tools.can_transcode()
+        && let Some(p) = probe.as_ref()
+    {
+        for track in p.subtitles.iter().filter(|t| ffmpeg::is_text_subtitle(t.codec.as_deref())) {
+            let lang = track.language.as_deref().filter(|l| *l != "und");
+            let base = lang.map(language_label).filter(|l| *l != "Unknown").map(String::from);
+            let label = match (base, track.title.as_deref()) {
+                (Some(b), Some(t)) if !t.eq_ignore_ascii_case(&b) => format!("{b} ({t})"),
+                (Some(b), _) => b,
+                (None, Some(t)) => t.to_string(),
+                (None, None) => format!("Track {}", track.index + 1),
+            };
+            subtitles.push(json!({
+                "id": format!("embedded-{}", track.index),
+                "embedded": true,
+                "language": lang,
+                "label": label,
+                "url": format!("/api/stream/{file_id}/subs/{}", track.index),
+            }));
+        }
+    }
+
+    // Other torrents with the same episode/movie, for the version picker.
+    let alternatives = match (is_tv, season, episode) {
+        (true, Some(s), Some(e)) => {
+            let ep: Option<i64> = sqlx::query_scalar(
+                "SELECT id FROM episodes WHERE media_id = ? AND season_number = ? AND episode_number = ?",
+            )
+            .bind(ctx.media_id)
+            .bind(s)
+            .bind(e)
+            .fetch_optional(&state.media)
+            .await?;
+            match ep {
+                Some(id) => files::files_for_episode(&state.media, id).await?,
+                None => Vec::new(),
+            }
+        }
+        (false, _, _) => files::files_for_movie(&state.media, ctx.media_id).await?,
+        _ => Vec::new(),
+    };
+    let versions: Vec<Value> = alternatives
+        .iter()
+        .map(|f| {
+            let label = [&f.resolution, &f.source, &f.video_codec, &f.hdr]
+                .into_iter()
+                .flatten()
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(" · ");
+            json!({
+                "file_id": f.file_id,
+                "info_hash": f.info_hash,
+                "label": label,
+                "torrent_name": f.torrent_name,
+                "size": f.size,
+            })
+        })
+        .collect();
     let (episode_name, still_path) = episode_info.unwrap_or((None, None));
 
     Ok(Json(json!({
@@ -527,6 +713,7 @@ async fn play(
         "resume_at": resume_at,
         "audio_tracks": probe.as_ref().map(|p| p.audio.clone()).unwrap_or_default(),
         "subtitles": subtitles,
+        "versions": versions,
         "file": {
             "path": ctx.path,
             "size": ctx.size,
