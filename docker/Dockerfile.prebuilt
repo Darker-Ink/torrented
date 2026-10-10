@@ -1,0 +1,22 @@
+# Packages binaries built by CI (see .github/workflows/build.yml) instead of
+# compiling inside the image, so multi-arch images build in seconds.
+# Expects bin/amd64/torrented and bin/arm64/torrented in the build context.
+
+FROM alpine:3.22
+ARG TARGETARCH
+RUN apk add --no-cache ffmpeg ca-certificates tzdata \
+    && addgroup -S -g 1000 torrented \
+    && adduser -S -D -H -u 1000 -G torrented torrented \
+    && mkdir /data \
+    && chown torrented:torrented /data
+COPY --chmod=755 bin/${TARGETARCH}/torrented /usr/local/bin/torrented
+
+USER torrented
+ENV TORRENTED_DATA_DIR=/data \
+    TORRENTED_LISTEN=0.0.0.0:8080 \
+    TORRENTED_PEER_PORT=6881
+VOLUME /data
+EXPOSE 8080 6881/tcp 6881/udp
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s \
+    CMD wget -qO /dev/null "http://127.0.0.1:${TORRENTED_LISTEN##*:}/api/instance" || exit 1
+ENTRYPOINT ["torrented"]

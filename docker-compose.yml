@@ -1,0 +1,34 @@
+# torrented — `docker compose up -d`, then open http://localhost:8080
+#
+# The first visit walks you through creating the owner account. Everything
+# (databases + the temporary streaming cache) lives in the `torrented-data`
+# volume.
+
+services:
+  torrented:
+    image: ghcr.io/darker-ink/torrented:latest
+    # Uncomment to build from this checkout instead of pulling the image:
+    # build: .
+    container_name: torrented
+    restart: unless-stopped
+    ports:
+      - "8080:8080"         # web UI
+      - "6881:6881/tcp"     # BitTorrent peers — forward this on your router for better speeds
+      - "6881:6881/udp"     # DHT / uTP
+    environment:
+      TZ: UTC
+      # Your own metadata keys (optional, they can also be set in Admin → Settings):
+      # TMDB_API_KEY: ""
+      # TVDB_API_KEY: ""
+      # Set to true when serving over HTTPS behind a reverse proxy:
+      # TORRENTED_SECURE_COOKIES: "true"
+      # Peers to always try, e.g. a seedbox (comma separated ip:port):
+      # TORRENTED_PEERS: ""
+    volumes:
+      - torrented-data:/data
+      # Prefer a folder on the host? Swap the line above for the one below and
+      # make sure the folder is owned by uid 1000 (`sudo chown 1000:1000 ./data`).
+      # - ./data:/data
+
+volumes:
+  torrented-data:
