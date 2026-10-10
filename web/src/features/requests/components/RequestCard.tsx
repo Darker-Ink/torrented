@@ -13,6 +13,7 @@ import { img } from "@/lib/images";
 import { can, PERM } from "@/lib/permissions";
 import type { MediaRequest, RequestStatus } from "@/lib/types";
 import { useRequestActions } from "../hooks/queries";
+import { titleUrl } from "@/lib/urls";
 
 const statusTone: Record<RequestStatus, "warning" | "primary" | "danger" | "success"> = {
   pending: "warning",
@@ -35,7 +36,7 @@ const RequestCard = ({ request }: { request: MediaRequest }) => {
   const [response, setResponse] = useState("");
   const manager = can(user, PERM.MANAGE_REQUESTS);
   const own = request.user_id === user?.id;
-  const link = request.media_id ? `/title/${request.media_id}` : `/discover/${request.kind}/${request.tmdb_id}`;
+  const link = titleUrl(request);
 
   const act = async (status: RequestStatus, resp?: string) => {
     try {
@@ -102,7 +103,7 @@ const RequestCard = ({ request }: { request: MediaRequest }) => {
             </Button>
           )}
           {request.media_id && request.status !== "declined" && (
-            <Link to={`/title/${request.media_id}`}>
+            <Link to={link}>
               <Button size="sm" variant="secondary">
                 Open title
               </Button>
@@ -126,7 +127,7 @@ const RequestCard = ({ request }: { request: MediaRequest }) => {
           </>
         }
       >
-        <Field label="Reason" description="Optional — shown to the person who asked.">
+        <Field label="Reason" description="Optional. Shown to the person who asked.">
           <Textarea value={response} onChange={(e) => setResponse(e.target.value)} />
         </Field>
       </Modal>

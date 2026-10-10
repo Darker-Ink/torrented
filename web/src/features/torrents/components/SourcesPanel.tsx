@@ -209,8 +209,8 @@ const SourcesPanel = ({ mediaId, title, kind }: Props) => {
       {!empty && (
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="text-sm text-muted">
-            Torrents attached to {title}. Files are matched to {kind === "tv" ? "episodes" : "the movie"} automatically —
-            fix anything that's off with the pencil.
+            Torrents attached to {title}. Files are matched to {kind === "tv" ? "episodes" : "the movie"} automatically.
+            Fix anything that's off with the pencil.
           </p>
           {canAdd && (
             <Button variant="primary" onClick={() => setAdding(true)}>

@@ -92,7 +92,7 @@ const AuditLog = () => {
                   <td className="px-4 py-2.5 text-xs whitespace-nowrap text-muted" title={e.created_at}>
                     {timeAgo(e.created_at)}
                   </td>
-                  <td className="px-4 py-2.5 whitespace-nowrap">{e.username ?? <span className="text-subtle">—</span>}</td>
+                  <td className="px-4 py-2.5 whitespace-nowrap">{e.username ?? <span className="text-subtle">System</span>}</td>
                   <td className="px-4 py-2.5">
                     <Badge tone={actionTone(e.action)}>{e.action}</Badge>
                   </td>
@@ -137,7 +137,7 @@ const StreamLog = () => {
             {data?.items.map((s) => (
               <tr key={s.id} className="border-b border-line/60 last:border-0">
                 <td className="px-4 py-2.5 text-xs whitespace-nowrap text-muted">{timeAgo(s.started_at)}</td>
-                <td className="px-4 py-2.5 whitespace-nowrap">{s.username ?? "—"}</td>
+                <td className="px-4 py-2.5 whitespace-nowrap">{s.username ?? "Unknown"}</td>
                 <td className="max-w-xs truncate px-4 py-2.5">
                   {s.title}
                   {s.season_number !== null && s.episode_number !== null && (
@@ -150,7 +150,7 @@ const StreamLog = () => {
                 <td className="px-4 py-2.5 text-xs whitespace-nowrap text-muted">
                   {s.ended_at
                     ? formatDuration((new Date(s.ended_at).getTime() - new Date(s.started_at).getTime()) / 1000)
-                    : "—"}
+                    : "Still watching"}
                 </td>
                 <td className="px-4 py-2.5 text-right text-xs whitespace-nowrap text-muted">{formatBytes(s.bytes_sent)}</td>
               </tr>

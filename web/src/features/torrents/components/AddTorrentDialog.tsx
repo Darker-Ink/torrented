@@ -37,7 +37,7 @@ const AddTorrentDialog = ({ open, onClose, mediaId, title, kind }: Props) => {
       toast.success(
         tab === 0 && source.startsWith("magnet:")
           ? "Fetching torrent details from peers…"
-          : `Added ${res.name ?? "torrent"} — scanning files`,
+          : `Added ${res.name ?? "torrent"}, scanning files`,
       );
       close();
     } catch (err) {
@@ -62,7 +62,7 @@ const AddTorrentDialog = ({ open, onClose, mediaId, title, kind }: Props) => {
       title={`Add a torrent to ${title}`}
       description={
         kind === "tv"
-          ? "Season packs and single episodes both work — files are matched to episodes automatically."
+          ? "Season packs and single episodes both work. Files are matched to episodes automatically."
           : "The largest video file is used as the movie; extras and samples are skipped."
       }
       footer={
@@ -86,7 +86,7 @@ const AddTorrentDialog = ({ open, onClose, mediaId, title, kind }: Props) => {
             content: (
               <Field
                 label="Magnet link, info hash or .torrent URL"
-                description="Nothing is downloaded now — only the file list is fetched."
+                description="Nothing is downloaded now, only the file list is fetched."
               >
                 <Textarea
                   value={source}

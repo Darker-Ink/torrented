@@ -14,10 +14,7 @@ const AppShell = ({ children }: Props) => {
   return (
     <div className="flex min-h-dvh flex-col">
       <Navbar />
-      <main className="flex-1">{children}</main>
-      <footer className="px-4 py-10 text-center text-xs text-subtle sm:px-10">
-        Streams come straight from the swarm — nothing is kept once you stop watching.
-      </footer>
+      <main className="flex-1 pb-16">{children}</main>
     </div>
   );
 };

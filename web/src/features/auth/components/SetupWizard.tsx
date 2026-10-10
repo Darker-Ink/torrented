@@ -105,7 +105,7 @@ const SetupWizard = () => {
           </Check>
           {!(instance?.ffmpeg && instance?.ffprobe) && (
             <p className="text-xs text-muted">
-              You can continue without them — MP4/WebM files will still play. Install ffmpeg and restart to enable
+              You can continue without them. MP4 and WebM files will still play. Install ffmpeg and restart to enable
               everything else.
             </p>
           )}

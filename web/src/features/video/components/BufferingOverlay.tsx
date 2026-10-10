@@ -18,7 +18,7 @@ const BufferingOverlay = ({ fileId, visible, starting }: Props) => {
               {p.peers} peer{p.peers === 1 ? "" : "s"} · {p.download_mbps.toFixed(1)} MiB/s
             </p>
           )}
-          {p && p.peers === 0 && <p className="text-xs text-white/50">Waiting for peers — this can take a minute.</p>}
+          {p && p.peers === 0 && <p className="text-xs text-white/50">Waiting for peers. This can take a minute.</p>}
         </div>
       </div>
     </div>
