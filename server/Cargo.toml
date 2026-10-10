@@ -18,7 +18,7 @@ clap = { version = "4", features = ["derive", "env"] }
 dashmap = "6"
 futures = "0.3"
 hex = "0.4"
-librqbit = { version = "9.0.1", default-features = false, features = ["rust-tls"] }
+librqbit = { version = "9.0.1", default-features = false, features = ["rust-tls", "disable-upload"] }
 mime_guess = "2"
 rand = "0.9"
 regex = "1"

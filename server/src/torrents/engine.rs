@@ -5,6 +5,8 @@
 //! are fetched in the order the reader needs them, and once nobody has read
 //! from the torrent for a while it is removed again together with its cached
 //! pieces. The cache directory is wiped on startup, so nothing accumulates.
+//! Only the read-ahead window of active streams is ever requested, and
+//! nothing is uploaded to other peers.
 
 use std::{
     collections::{HashMap, HashSet},
@@ -144,6 +146,8 @@ impl TorrentEngine {
             }),
             ipv4_only: true,
             disable_local_service_discovery: !ipv6,
+            // Leech only: never advertise or serve pieces to other peers.
+            disable_upload: true,
             // Each open stream holds one of these permits while it's alive.
             runtime_worker_threads: Some(256),
             peer_limit: Some(120),
