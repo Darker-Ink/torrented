@@ -20,7 +20,7 @@ use librqbit::{
     AddTorrent, AddTorrentOptions, AddTorrentResponse, DhtSessionConfig, ListenerMode,
     ListenerOptions, ManagedTorrent, Session, SessionOptions,
     api::TorrentIdOrHash,
-    dht::{DhtPersistenceConfig, Id20},
+    dht::DhtPersistenceConfig,
 };
 use serde::Serialize;
 
@@ -102,9 +102,6 @@ pub struct TorrentEngine {
     add_lock: tokio::sync::Mutex<()>,
 }
 
-pub fn parse_info_hash(hex: &str) -> anyhow::Result<Id20> {
-    hex.parse::<Id20>().context("invalid info hash")
-}
 
 impl TorrentEngine {
     pub async fn start(data_dir: &Path, cache_dir: PathBuf, peer_port: Option<u16>) -> anyhow::Result<Arc<Self>> {
