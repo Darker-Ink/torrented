@@ -14,8 +14,15 @@ use std::{
     process::Command,
 };
 
+/// npm and pnpm are batch shims on Windows and have to be invoked with their
+/// extension.
 fn package_manager() -> Option<&'static str> {
-    ["bun", "pnpm", "npm"].into_iter().find(|pm| {
+    let candidates: &[&'static str] = if cfg!(windows) {
+        &["bun", "pnpm.cmd", "npm.cmd"]
+    } else {
+        &["bun", "pnpm", "npm"]
+    };
+    candidates.iter().copied().find(|pm| {
         Command::new(pm)
             .arg("--version")
             .output()
