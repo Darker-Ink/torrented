@@ -305,10 +305,20 @@ export type AudioTrack = {
 };
 
 export type SubtitleOption = {
-  file_id: number;
+  id: string;
+  /** Embedded tracks are fetched in time windows; files are fetched whole. */
+  embedded: boolean;
   language: string | null;
   label: string;
   url: string;
+};
+
+export type VersionOption = {
+  file_id: number;
+  info_hash: string;
+  label: string;
+  torrent_name: string;
+  size: number;
 };
 
 export type PlayInfo = {
@@ -323,6 +333,7 @@ export type PlayInfo = {
   resume_at: number;
   audio_tracks: AudioTrack[];
   subtitles: SubtitleOption[];
+  versions: VersionOption[];
   file: {
     path: string;
     size: number;

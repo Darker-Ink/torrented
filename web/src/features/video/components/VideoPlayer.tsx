@@ -1,62 +1,65 @@
-import { Popover, PopoverButton, PopoverPanel } from "@headlessui/react";
 import clsx from "clsx";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { toast } from "@/features/ui/components/Toaster";
+import { api, errorMessage } from "@/lib/api";
 import { episodeCode, formatBytes, formatClock } from "@/lib/format";
+import { img } from "@/lib/images";
+import { normalizeLang, storage } from "@/lib/storage";
 import type { PlayInfo } from "@/lib/types";
 import { titleUrl, watchUrl } from "@/lib/urls";
+import { castSupported, useCast } from "../hooks/useCast";
 import { reportProgress } from "../hooks/usePlayback";
 import { useSubtitles } from "../hooks/useSubtitles";
 import BufferingOverlay from "./BufferingOverlay";
+import ContextMenu, { type ContextItem } from "./ContextMenu";
 import CueText from "./CueText";
-import SeekBar from "./SeekBar";
 import {
-  AudioGlyph,
   BackGlyph,
+  CaptionsGlyph,
+  CastGlyph,
   CollapseGlyph,
   ExpandGlyph,
-  InfoGlyph,
   NextGlyph,
   PauseGlyph,
+  PipGlyph,
   PlayGlyph,
   SkipBackGlyph,
   SkipForwardGlyph,
-  SubtitlesGlyph,
   VolumeGlyph,
 } from "./PlayerIcons";
-import TrackMenu, { controlButton, glassPanel } from "./TrackMenu";
+import SeekBar from "./SeekBar";
+import SettingsMenu, { type SettingsPage, type SettingsToggle } from "./SettingsMenu";
+import ShortcutsDialog from "./ShortcutsDialog";
+import StatsOverlay from "./StatsOverlay";
+import { controlButton } from "./styles";
 import UpNext from "./UpNext";
 
 type Props = { info: PlayInfo; startAt?: number | null };
 
-const VOLUME_KEY = "torrented.volume";
-const SUBS_KEY = "torrented.subtitles";
+const KEYS = {
+  volume: "torrented.volume",
+  subtitles: "torrented.subtitles",
+  subtitleSize: "torrented.subtitleSize",
+  subtitleStyle: "torrented.subtitleStyle",
+  autoplay: "torrented.autoplay",
+};
 
-const storage = {
-  get: (k: string) => {
-    try {
-      return localStorage.getItem(k);
-    } catch {
-      return null;
-    }
-  },
-  set: (k: string, v: string) => {
-    try {
-      localStorage.setItem(k, v);
-    } catch {
-      /* ignore */
-    }
-  },
+const SPEEDS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
+
+const SUBTITLE_SIZES: Record<string, string> = {
+  small: "text-base sm:text-xl",
+  medium: "text-xl sm:text-[28px]",
+  large: "text-2xl sm:text-[36px]",
+  huge: "text-3xl sm:text-[46px]",
 };
 
 type Flash = { kind: "play" | "pause" | "back" | "forward"; key: number };
 
 const VideoPlayer = ({ info: original, startAt }: Props) => {
   // A ?t= in the link overrides the saved position.
-  const info = useMemo(
-    () => (startAt && startAt > 0 ? { ...original, resume_at: startAt } : original),
-    [original, startAt],
-  );
+  const fromLink = !!startAt && startAt > 0;
+  const info = useMemo(() => (fromLink ? { ...original, resume_at: startAt! } : original), [original, startAt, fromLink]);
   const navigate = useNavigate();
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -77,7 +80,7 @@ const VideoPlayer = ({ info: original, startAt }: Props) => {
   const [buffering, setBuffering] = useState(true);
   const [started, setStarted] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [volume, setVolume] = useState(() => Number(storage.get(VOLUME_KEY) ?? 1));
+  const [volume, setVolume] = useState(() => Number(storage.get(KEYS.volume) ?? 1));
   const [muted, setMuted] = useState(false);
   const [controls, setControls] = useState(true);
   const [fullscreen, setFullscreen] = useState(false);
@@ -86,25 +89,43 @@ const VideoPlayer = ({ info: original, startAt }: Props) => {
   const [countdown, setCountdown] = useState(10);
   const [flash, setFlash] = useState<Flash | null>(null);
   const [showRemaining, setShowRemaining] = useState(true);
+  const [speed, setSpeed] = useState(1);
+  const [loop, setLoop] = useState(false);
+  const [stats, setStats] = useState(false);
+  const [shortcuts, setShortcuts] = useState(false);
+  const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null);
+  const [pip, setPip] = useState(false);
+  const [autoplay, setAutoplay] = useState(() => storage.get(KEYS.autoplay) !== "false");
+  const [subSize, setSubSize] = useState(() => storage.get(KEYS.subtitleSize) ?? "medium");
+  const [subStyle, setSubStyle] = useState(() => storage.get(KEYS.subtitleStyle) ?? "box");
   const pulse = (kind: Flash["kind"]) => setFlash({ kind, key: Date.now() });
 
-  const preferredLang = storage.get(SUBS_KEY);
+  // Subtitles: pick the remembered language, external files first.
   const [subtitle, setSubtitle] = useState<string>(() => {
-    if (!preferredLang || preferredLang === "off") return "off";
-    const match = info.subtitles.find((s) => s.language === preferredLang);
-    return match ? String(match.file_id) : "off";
+    const pref = storage.get(KEYS.subtitles);
+    if (!pref || pref === "off") return "off";
+    const match = info.subtitles.find((s) => normalizeLang(s.language) === normalizeLang(pref));
+    return match?.id ?? "off";
   });
-  const subUrl = subtitle === "off" ? null : (info.subtitles.find((s) => String(s.file_id) === subtitle)?.url ?? null);
-  const { text: cueText } = useSubtitles(subUrl, current);
+  const lastSubtitle = useRef<string | null>(subtitle !== "off" ? subtitle : null);
+  const activeTrack = info.subtitles.find((s) => s.id === subtitle) ?? null;
+  const cueText = useSubtitles(activeTrack, current);
 
   const src = seekable
     ? baseUrl
     : `${baseUrl}&start=${offset.toFixed(2)}${audio !== null ? `&audio=${audio}` : ""}`;
   const duration = seekable ? (mediaDuration ?? info.duration) : info.duration;
 
+  // ---- Casting -------------------------------------------------------------
+  const cast = useCast();
+  const casting = cast.status === "connected";
+  const castOffset = useRef(0);
+  const castTime = castOffset.current + cast.time;
+  const shownTime = casting ? castTime : current;
+
   // Keep a ref of the latest position for unmount reporting.
-  const latest = useRef({ current, duration });
-  latest.current = { current, duration };
+  const latest = useRef({ current: shownTime, duration });
+  latest.current = { current: shownTime, duration };
 
   const report = useCallback(
     (beacon = false) => {
@@ -115,12 +136,11 @@ const VideoPlayer = ({ info: original, startAt }: Props) => {
     [info.file_id, info.session_id],
   );
 
-  // Periodic progress while playing, plus on leave.
   useEffect(() => {
-    if (!playing) return;
+    if (!playing && !(casting && !cast.paused)) return;
     const t = window.setInterval(() => report(), 10_000);
     return () => window.clearInterval(t);
-  }, [playing, report]);
+  }, [playing, casting, cast.paused, report]);
 
   useEffect(() => {
     const onLeave = () => report(true);
@@ -137,6 +157,10 @@ const VideoPlayer = ({ info: original, startAt }: Props) => {
     v.volume = volume;
     v.muted = muted;
   }, [volume, muted]);
+
+  useEffect(() => {
+    if (videoRef.current) videoRef.current.playbackRate = speed;
+  }, [speed]);
 
   useEffect(() => {
     if (!resumedNote) return;
@@ -158,7 +182,30 @@ const VideoPlayer = ({ info: original, startAt }: Props) => {
     return () => document.removeEventListener("fullscreenchange", onFs);
   }, []);
 
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    const enter = () => setPip(true);
+    const leave = () => setPip(false);
+    v.addEventListener("enterpictureinpicture", enter);
+    v.addEventListener("leavepictureinpicture", leave);
+    return () => {
+      v.removeEventListener("enterpictureinpicture", enter);
+      v.removeEventListener("leavepictureinpicture", leave);
+    };
+  }, []);
+
+  // Local playback pauses while a cast device is playing.
+  useEffect(() => {
+    if (casting) videoRef.current?.pause();
+  }, [casting]);
+
   const togglePlay = useCallback(() => {
+    if (casting) {
+      cast.playOrPause();
+      pulse(cast.paused ? "play" : "pause");
+      return;
+    }
     const v = videoRef.current;
     if (!v) return;
     if (v.paused) {
@@ -168,14 +215,45 @@ const VideoPlayer = ({ info: original, startAt }: Props) => {
       v.pause();
       pulse("pause");
     }
-  }, []);
+  }, [casting, cast]);
+
+  const castUrl = useCallback(
+    async (start: number) => {
+      const { token } = await api.post<{ token: string }>(`/play/${info.file_id}/cast`);
+      const origin = window.location.origin;
+      const direct = mode === "direct";
+      const url = direct
+        ? `${origin}/api/stream/${info.file_id}?token=${token}`
+        : `${origin}/api/stream/${info.file_id}/transcode?token=${token}&start=${start.toFixed(2)}`;
+      const ext = info.file.path.split(".").pop()?.toLowerCase();
+      return {
+        token,
+        url,
+        contentType: !direct ? "video/mp4" : ext === "webm" ? "video/webm" : "video/mp4",
+        startTime: direct ? start : 0,
+      };
+    },
+    [info.file_id, info.file.path, mode],
+  );
 
   const seek = useCallback(
     (t: number) => {
-      const v = videoRef.current;
-      if (!v) return;
       const max = duration ?? Infinity;
       const target = Math.max(0, Math.min(t, max - 1));
+      if (casting) {
+        if (mode === "direct") {
+          cast.seek(target);
+        } else {
+          // Remuxed streams restart on the device at the new position.
+          castUrl(target).then((m) => {
+            castOffset.current = target;
+            return cast.start({ ...m, title: info.media.title, tracks: [], startTime: 0 });
+          });
+        }
+        return;
+      }
+      const v = videoRef.current;
+      if (!v) return;
       setCurrent(target);
       if (seekable) {
         v.currentTime = target;
@@ -184,13 +262,34 @@ const VideoPlayer = ({ info: original, startAt }: Props) => {
         setOffset(target);
       }
     },
-    [duration, seekable],
+    [duration, seekable, casting, mode, cast, castUrl, info.media.title],
   );
 
   const toggleFullscreen = useCallback(() => {
     if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
     else containerRef.current?.requestFullscreen().catch(() => {});
   }, []);
+
+  const togglePip = useCallback(async () => {
+    const v = videoRef.current;
+    if (!v || !document.pictureInPictureEnabled) return;
+    try {
+      if (document.pictureInPictureElement) await document.exitPictureInPicture();
+      else await v.requestPictureInPicture();
+    } catch (err) {
+      toast.error(errorMessage(err));
+    }
+  }, []);
+
+  const toggleCaptions = useCallback(() => {
+    if (subtitle !== "off") {
+      lastSubtitle.current = subtitle;
+      setSubtitle("off");
+    } else {
+      const next = lastSubtitle.current ?? info.subtitles[0]?.id;
+      if (next) setSubtitle(next);
+    }
+  }, [subtitle, info.subtitles]);
 
   const goNext = useCallback(() => {
     if (!info.next) return;
@@ -210,57 +309,98 @@ const VideoPlayer = ({ info: original, startAt }: Props) => {
     navigate(titleUrl(info.media));
   };
 
+  const shareUrl = (withTime: boolean) =>
+    window.location.origin +
+    watchUrl(info.media, {
+      season: info.episode?.season_number,
+      episode: info.episode?.episode_numbers[0],
+      version: info.versions.length > 1 ? info.info_hash : null,
+      t: withTime ? shownTime : null,
+    });
+
+  const copy = (text: string, what: string) =>
+    navigator.clipboard
+      .writeText(text)
+      .then(() => toast.success(`${what} copied`))
+      .catch(() => toast.info(text));
+
+  const startCasting = async () => {
+    const host = window.location.hostname;
+    if (host === "localhost" || host.startsWith("127.")) {
+      toast.error("Open torrented by its network address (not localhost) so the cast device can reach it.");
+      return;
+    }
+    try {
+      const m = await castUrl(shownTime);
+      castOffset.current = mode === "direct" ? 0 : shownTime;
+      const files = info.subtitles.filter((s) => !s.embedded);
+      await cast.start({
+        ...m,
+        title: info.episode ? (info.episode.name ?? info.media.title) : info.media.title,
+        subtitle: info.episode
+          ? `${info.media.title} · ${episodeCode(info.episode.season_number, info.episode.episode_numbers)}`
+          : undefined,
+        image: img(info.media.backdrop_path, "w1280"),
+        tracks: files.map((s, i) => ({
+          id: i + 1,
+          url: `${window.location.origin}${s.url}?token=${m.token}`,
+          label: s.label,
+          language: s.language,
+        })),
+        activeTrack: (() => {
+          const i = files.findIndex((s) => s.id === subtitle);
+          return i === -1 ? null : i + 1;
+        })(),
+      });
+    } catch (err) {
+      if (err) toast.error(typeof err === "string" ? "Casting was cancelled" : errorMessage(err));
+    }
+  };
+
   // Keyboard shortcuts.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
-      const v = videoRef.current;
-      if (!v) return;
-      switch (e.key) {
-        case " ":
-        case "k":
-          e.preventDefault();
-          togglePlay();
-          break;
-        case "ArrowLeft":
-          e.preventDefault();
-          seek(current - 10);
-          pulse("back");
-          break;
-        case "ArrowRight":
-          e.preventDefault();
-          seek(current + 10);
-          pulse("forward");
-          break;
-        case "ArrowUp":
-          e.preventDefault();
-          setVolume((x) => Math.min(1, x + 0.1));
-          break;
-        case "ArrowDown":
-          e.preventDefault();
-          setVolume((x) => Math.max(0, x - 0.1));
-          break;
-        case "m":
-          setMuted((m) => !m);
-          break;
-        case "f":
-          toggleFullscreen();
-          break;
-        case "n":
-          goNext();
-          break;
-        default:
-          return;
-      }
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const key = e.key;
+      if (/^[0-9]$/.test(key) && duration) {
+        seek((Number(key) / 10) * duration);
+      } else if (key === " " || key === "k") {
+        e.preventDefault();
+        togglePlay();
+      } else if (key === "ArrowLeft" || key === "j") {
+        e.preventDefault();
+        seek(shownTime - 10);
+        pulse("back");
+      } else if (key === "ArrowRight" || key === "l") {
+        e.preventDefault();
+        seek(shownTime + 10);
+        pulse("forward");
+      } else if (key === "ArrowUp") {
+        e.preventDefault();
+        setVolume((x) => Math.min(1, x + 0.1));
+      } else if (key === "ArrowDown") {
+        e.preventDefault();
+        setVolume((x) => Math.max(0, x - 0.1));
+      } else if (key === "m") setMuted((m) => !m);
+      else if (key === "f") toggleFullscreen();
+      else if (key === "n") goNext();
+      else if (key === "c") toggleCaptions();
+      else if (key === "p") togglePip();
+      else if (key === "i") setStats((s) => !s);
+      else if (key === "?") setShortcuts(true);
+      else if (key === ">") setSpeed((s) => SPEEDS[Math.min(SPEEDS.length - 1, SPEEDS.indexOf(s) + 1)] ?? s);
+      else if (key === "<") setSpeed((s) => SPEEDS[Math.max(0, SPEEDS.indexOf(s) - 1)] ?? s);
+      else return;
       showControls();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [current, goNext, seek, showControls, toggleFullscreen, togglePlay]);
+  }, [shownTime, duration, goNext, seek, showControls, toggleFullscreen, togglePlay, toggleCaptions, togglePip]);
 
   // Up next.
-  const remaining = duration ? duration - current : Infinity;
-  const showUpNext = !!info.next && !upNextDismissed && started && remaining < 30;
+  const remaining = duration ? duration - shownTime : Infinity;
+  const showUpNext = autoplay && !!info.next && !upNextDismissed && started && remaining < 30 && !loop;
   useEffect(() => {
     if (!showUpNext) {
       setCountdown(10);
@@ -286,8 +426,15 @@ const VideoPlayer = ({ info: original, startAt }: Props) => {
 
   const onLoadedMetadata = () => {
     const v = videoRef.current!;
+    v.playbackRate = speed;
     if (Number.isFinite(v.duration)) setMediaDuration(v.duration);
     if (seekable && validResume && !started) v.currentTime = info.resume_at;
+  };
+
+  const onEnded = () => {
+    report();
+    if (loop) seek(0);
+    else if (info.next && autoplay) goNext();
   };
 
   const onError = () => {
@@ -303,38 +450,140 @@ const VideoPlayer = ({ info: original, startAt }: Props) => {
     );
   };
 
-  const subtitleOptions = useMemo(
-    () => [
-      { value: "off", label: "Off" },
-      ...info.subtitles.map((s) => ({ value: String(s.file_id), label: s.label, hint: s.language ?? undefined })),
-    ],
-    [info.subtitles],
-  );
-
-  const audioOptions = info.audio_tracks.map((a) => ({
-    value: String(a.index),
-    label: a.title || (a.language ? a.language.toUpperCase() : `Track ${a.index + 1}`),
-    hint: [a.codec?.toUpperCase(), a.channels ? `${a.channels}ch` : null].filter(Boolean).join(" · "),
-  }));
-  const currentAudio = String(audio ?? info.audio_tracks.find((a) => a.default)?.index ?? 0);
-
   const changeAudio = (value: string) => {
-    const idx = Number(value);
-    if (seekable) {
-      // Switching audio needs the remux path.
-      setCompat(true);
-    }
+    if (seekable) setCompat(true); // switching audio needs the remux path
     setOffset(current);
-    setAudio(idx);
+    setAudio(Number(value));
     setBuffering(true);
   };
 
   const changeSubtitle = (value: string) => {
     setSubtitle(value);
-    const lang = info.subtitles.find((s) => String(s.file_id) === value)?.language ?? "off";
-    storage.set(SUBS_KEY, value === "off" ? "off" : lang);
+    if (value !== "off") lastSubtitle.current = value;
+    const lang = info.subtitles.find((s) => s.id === value)?.language ?? "off";
+    storage.set(KEYS.subtitles, value === "off" ? "off" : lang);
   };
 
+  const changeVersion = (infoHash: string) => {
+    if (infoHash === info.info_hash) return;
+    report();
+    navigate(
+      watchUrl(info.media, {
+        season: info.episode?.season_number,
+        episode: info.episode?.episode_numbers[0],
+        version: infoHash,
+        t: shownTime,
+      }),
+      { replace: true },
+    );
+  };
+
+  // ---- Menus ---------------------------------------------------------------
+  const pages: SettingsPage[] = [
+    {
+      key: "speed",
+      label: "Playback speed",
+      value: String(speed),
+      choices: SPEEDS.map((s) => ({ value: String(s), label: s === 1 ? "Normal" : `${s}×` })),
+      onChange: (v) => setSpeed(Number(v)),
+    },
+  ];
+  if (info.subtitles.length > 0) {
+    pages.push(
+      {
+        key: "subtitles",
+        label: "Subtitles",
+        value: subtitle,
+        choices: [
+          { value: "off", label: "Off" },
+          ...info.subtitles.map((s) => ({
+            value: s.id,
+            label: s.label,
+            hint: s.embedded ? "In the video file" : "Subtitle file",
+          })),
+        ],
+        onChange: changeSubtitle,
+      },
+      {
+        key: "subtitle-size",
+        label: "Subtitle size",
+        value: subSize,
+        choices: [
+          { value: "small", label: "Small" },
+          { value: "medium", label: "Medium" },
+          { value: "large", label: "Large" },
+          { value: "huge", label: "Extra large" },
+        ],
+        onChange: (v) => {
+          setSubSize(v);
+          storage.set(KEYS.subtitleSize, v);
+        },
+      },
+      {
+        key: "subtitle-style",
+        label: "Subtitle style",
+        value: subStyle,
+        choices: [
+          { value: "box", label: "Dark box" },
+          { value: "outline", label: "Outline only" },
+        ],
+        onChange: (v) => {
+          setSubStyle(v);
+          storage.set(KEYS.subtitleStyle, v);
+        },
+      },
+    );
+  }
+  if (info.audio_tracks.length > 1) {
+    pages.push({
+      key: "audio",
+      label: "Audio",
+      value: String(audio ?? info.audio_tracks.find((a) => a.default)?.index ?? 0),
+      choices: info.audio_tracks.map((a) => ({
+        value: String(a.index),
+        label: a.title || (a.language ? a.language.toUpperCase() : `Track ${a.index + 1}`),
+        hint: [a.codec?.toUpperCase(), a.channels ? `${a.channels} channels` : null].filter(Boolean).join(" · "),
+      })),
+      onChange: changeAudio,
+    });
+  }
+  if (info.versions.length > 1) {
+    pages.push({
+      key: "version",
+      label: "Version",
+      value: info.info_hash,
+      choices: info.versions.map((v) => ({
+        value: v.info_hash,
+        label: v.label || "Video",
+        hint: `${formatBytes(v.size)} · ${v.torrent_name}`,
+      })),
+      onChange: changeVersion,
+    });
+  }
+  const toggles: SettingsToggle[] = [];
+  if (info.episode) {
+    toggles.push({
+      key: "autoplay",
+      label: "Autoplay next episode",
+      checked: autoplay,
+      onChange: (v) => {
+        setAutoplay(v);
+        storage.set(KEYS.autoplay, String(v));
+      },
+    });
+  }
+  toggles.push({ key: "stats", label: "Stats for nerds", checked: stats, onChange: setStats });
+
+  const contextItems: ContextItem[] = [
+    { key: "loop", label: "Loop", checked: loop, onSelect: () => setLoop((l) => !l) },
+    { key: "copy", label: "Copy video link", onSelect: () => copy(shareUrl(false), "Link") },
+    { key: "copy-time", label: "Copy video link at current time", onSelect: () => copy(shareUrl(true), "Link") },
+    ...(document.pictureInPictureEnabled
+      ? [{ key: "pip", label: "Picture-in-picture", hint: "P", checked: pip, onSelect: togglePip }]
+      : []),
+    { key: "stats", label: "Stats for nerds", hint: "I", checked: stats, onSelect: () => setStats((s) => !s) },
+    { key: "keys", label: "Keyboard shortcuts", hint: "?", onSelect: () => setShortcuts(true) },
+  ];
 
   const level = muted ? 0 : volume;
   const titleLine = info.episode ? (info.episode.name ?? `Episode ${info.episode.episode_numbers[0]}`) : info.media.title;
@@ -342,13 +591,19 @@ const VideoPlayer = ({ info: original, startAt }: Props) => {
     ? `${info.media.title} · ${episodeCode(info.episode.season_number, info.episode.episode_numbers)}`
     : [info.media.year, info.file.resolution].filter(Boolean).join(" · ");
   const modeLabel = mode === "direct" ? "Direct play" : mode === "remux" ? "Remux" : "Transcode";
+  const isPlaying = casting ? !cast.paused : playing;
+  const bufferAhead = Math.max(0, buffered - current);
 
   return (
     <div
       ref={containerRef}
       onMouseMove={showControls}
       onClick={showControls}
-      className={clsx("fixed inset-0 bg-black text-white select-none", !controls && playing && "cursor-none")}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        setMenuAt({ x: e.clientX, y: e.clientY });
+      }}
+      className={clsx("fixed inset-0 bg-black text-white select-none", !controls && isPlaying && "cursor-none")}
     >
       <video
         ref={videoRef}
@@ -374,29 +629,55 @@ const VideoPlayer = ({ info: original, startAt }: Props) => {
         onCanPlay={() => setBuffering(false)}
         onTimeUpdate={onTimeUpdate}
         onLoadedMetadata={onLoadedMetadata}
-        onEnded={() => {
-          report();
-          if (info.next) goNext();
-        }}
+        onEnded={onEnded}
         onError={onError}
       />
 
-      {cueText && (
+      {casting && (
+        <div className="absolute inset-0 z-[5] grid place-items-center bg-black/80">
+          {info.media.backdrop_path && (
+            <img src={img(info.media.backdrop_path, "w1280")} alt="" className="absolute inset-0 size-full object-cover opacity-25 blur-sm" />
+          )}
+          <div className="relative space-y-4 text-center">
+            <CastGlyph connected className="mx-auto size-14 text-primary" />
+            <p className="text-lg font-semibold">Playing on {cast.device ?? "your TV"}</p>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                cast.stop();
+              }}
+              className="rounded-full bg-white/10 px-5 py-2 text-sm font-semibold ring-1 ring-white/20 hover:bg-white/20"
+            >
+              Stop casting
+            </button>
+          </div>
+        </div>
+      )}
+
+      {cueText && !casting && (
         <div
           className={clsx(
             "pointer-events-none absolute inset-x-0 flex justify-center px-8 transition-[bottom] duration-200",
             controls ? "bottom-48" : "bottom-14",
           )}
         >
-          <p className="max-w-4xl rounded-lg bg-black/60 px-4 py-1.5 text-center text-xl leading-snug font-semibold whitespace-pre-line [text-shadow:0_1px_3px_rgb(0_0_0/0.8)] sm:text-[28px]">
+          <p
+            className={clsx(
+              "max-w-4xl text-center leading-snug font-semibold whitespace-pre-line",
+              SUBTITLE_SIZES[subSize] ?? SUBTITLE_SIZES.medium,
+              subStyle === "box"
+                ? "rounded-lg bg-black/60 px-4 py-1.5 [text-shadow:0_1px_3px_rgb(0_0_0/0.8)]"
+                : "[text-shadow:0_0_3px_#000,0_0_3px_#000,0_2px_4px_#000,0_0_8px_#000]",
+            )}
+          >
             <CueText text={cueText} />
           </p>
         </div>
       )}
 
-      <BufferingOverlay fileId={info.file_id} visible={buffering && !error} starting={!started} />
+      <BufferingOverlay fileId={info.file_id} visible={buffering && !error && !casting} starting={!started} />
 
-      {!playing && !buffering && !error && (
+      {!playing && !buffering && !error && !casting && (
         <button
           onClick={togglePlay}
           aria-label="Play"
@@ -406,7 +687,7 @@ const VideoPlayer = ({ info: original, startAt }: Props) => {
         </button>
       )}
 
-      {error && (
+      {error && !casting && (
         <div className="absolute inset-0 z-20 grid place-items-center bg-black/70 p-6">
           <div className="max-w-md space-y-4 text-center">
             <p className="text-lg font-semibold">{error}</p>
@@ -447,7 +728,7 @@ const VideoPlayer = ({ info: original, startAt }: Props) => {
 
       {resumedNote && started && (
         <div className="absolute top-24 left-1/2 z-20 flex -translate-x-1/2 animate-rise items-center gap-3 rounded-full border border-white/10 bg-neutral-950/80 py-1.5 pr-1.5 pl-4 text-sm shadow-xl backdrop-blur-xl">
-          Resumed from {formatClock(info.resume_at)}
+          {fromLink ? "Starting at" : "Resumed from"} {formatClock(info.resume_at)}
           <button
             onClick={() => {
               setResumedNote(false);
@@ -459,6 +740,8 @@ const VideoPlayer = ({ info: original, startAt }: Props) => {
           </button>
         </div>
       )}
+
+      {stats && <StatsOverlay info={info} mode={mode} video={videoRef} bufferAhead={bufferAhead} position={shownTime} onClose={() => setStats(false)} />}
 
       {showUpNext && info.next && (
         <UpNext next={info.next} countdown={countdown} onPlay={goNext} onDismiss={() => setUpNextDismissed(true)} />
@@ -481,6 +764,7 @@ const VideoPlayer = ({ info: original, startAt }: Props) => {
         <span className="rounded-full border border-white/10 bg-black/40 px-3 py-1 text-xs font-medium text-white/70 backdrop-blur">
           {modeLabel}
           {info.file.resolution ? ` · ${info.file.resolution}` : ""}
+          {speed !== 1 ? ` · ${speed}×` : ""}
         </span>
       </div>
 
@@ -498,25 +782,25 @@ const VideoPlayer = ({ info: original, startAt }: Props) => {
         </div>
 
         <div className="flex items-center gap-4">
-          <span className="w-14 text-sm font-medium text-white/80 tabular-nums">{formatClock(current)}</span>
-          <SeekBar current={current} duration={duration} buffered={buffered} onSeek={seek} />
+          <span className="w-14 text-sm font-medium text-white/80 tabular-nums">{formatClock(shownTime)}</span>
+          <SeekBar current={shownTime} duration={duration} buffered={casting ? 0 : buffered} onSeek={seek} />
           <button
             onClick={() => setShowRemaining((r) => !r)}
             className="w-16 text-right text-sm font-medium text-white/80 tabular-nums hover:text-white"
             title="Toggle remaining time"
           >
-            {duration ? (showRemaining ? `-${formatClock(Math.max(0, duration - current))}` : formatClock(duration)) : "--:--"}
+            {duration ? (showRemaining ? `-${formatClock(Math.max(0, duration - shownTime))}` : formatClock(duration)) : "--:--"}
           </button>
         </div>
 
         <div className="mt-2 flex items-center justify-between gap-2">
           <div className="flex items-center gap-1 sm:gap-2">
-            <button onClick={togglePlay} className={clsx(controlButton, "size-12")} aria-label={playing ? "Pause" : "Play"}>
-              {playing ? <PauseGlyph className="size-8" /> : <PlayGlyph className="size-8" />}
+            <button onClick={togglePlay} className={clsx(controlButton, "size-12")} aria-label={isPlaying ? "Pause" : "Play"}>
+              {isPlaying ? <PauseGlyph className="size-8" /> : <PlayGlyph className="size-8" />}
             </button>
             <button
               onClick={() => {
-                seek(current - 10);
+                seek(shownTime - 10);
                 pulse("back");
               }}
               className={controlButton}
@@ -526,7 +810,7 @@ const VideoPlayer = ({ info: original, startAt }: Props) => {
             </button>
             <button
               onClick={() => {
-                seek(current + 10);
+                seek(shownTime + 10);
                 pulse("forward");
               }}
               className={controlButton}
@@ -548,7 +832,7 @@ const VideoPlayer = ({ info: original, startAt }: Props) => {
                   const v = Number(e.target.value);
                   setVolume(v);
                   setMuted(v === 0);
-                  storage.set(VOLUME_KEY, String(v));
+                  storage.set(KEYS.volume, String(v));
                 }}
                 style={{ background: `linear-gradient(to right, white ${level * 100}%, rgb(255 255 255 / 0.25) ${level * 100}%)` }}
                 className="range-slim w-0 opacity-0 transition-all duration-200 group-hover/vol:ml-1 group-hover/vol:w-24 group-hover/vol:opacity-100 focus:ml-1 focus:w-24 focus:opacity-100"
@@ -573,56 +857,46 @@ const VideoPlayer = ({ info: original, startAt }: Props) => {
               </button>
             )}
             {info.subtitles.length > 0 && (
-              <TrackMenu
-                icon={<SubtitlesGlyph className="size-7" />}
-                label="Subtitles"
-                title="Subtitles"
-                value={subtitle}
-                options={subtitleOptions}
-                onChange={changeSubtitle}
-              />
+              <button
+                onClick={toggleCaptions}
+                className={clsx(controlButton, subtitle !== "off" && "text-white")}
+                aria-label={subtitle !== "off" ? "Turn captions off" : "Turn captions on"}
+                aria-pressed={subtitle !== "off"}
+                title="Captions (C)"
+              >
+                <CaptionsGlyph on={subtitle !== "off"} className="size-7" />
+              </button>
             )}
-            {audioOptions.length > 1 && (
-              <TrackMenu
-                icon={<AudioGlyph className="size-7" />}
-                label="Audio"
-                title="Audio"
-                value={currentAudio}
-                options={audioOptions}
-                onChange={changeAudio}
-              />
+            <SettingsMenu pages={pages} toggles={toggles} />
+            {document.pictureInPictureEnabled && (
+              <button
+                onClick={togglePip}
+                className={clsx(controlButton, pip && "text-primary")}
+                aria-label="Picture-in-picture"
+                title="Picture-in-picture (P)"
+              >
+                <PipGlyph className="size-7" />
+              </button>
             )}
-            <Popover className="relative">
-              <PopoverButton className={clsx(controlButton, "data-[open]:text-primary")} aria-label="Stream info">
-                <InfoGlyph className="size-7" />
-              </PopoverButton>
-              <PopoverPanel anchor={{ to: "top end", gap: 12 }} transition className={clsx(glassPanel, "w-80 space-y-3 p-5 text-sm")}>
-                <div>
-                  <p className="font-semibold">{modeLabel}</p>
-                  <p className="mt-0.5 text-xs text-white/55">
-                    {compat && info.mode === "direct" ? "Compatibility mode, repackaged by the server" : info.reason}
-                  </p>
-                </div>
-                <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-xs">
-                  <dt className="text-white/45">File</dt>
-                  <dd className="truncate" title={info.file.path}>
-                    {info.file.path.split("/").pop()}
-                  </dd>
-                  <dt className="text-white/45">Video</dt>
-                  <dd>{[info.file.resolution, info.file.video_codec?.toUpperCase()].filter(Boolean).join(" · ") || "Unknown"}</dd>
-                  <dt className="text-white/45">Audio</dt>
-                  <dd>{info.file.audio_codec?.toUpperCase() ?? "Unknown"}</dd>
-                  <dt className="text-white/45">Size</dt>
-                  <dd>{formatBytes(info.file.size)}</dd>
-                </dl>
-              </PopoverPanel>
-            </Popover>
-            <button onClick={toggleFullscreen} className={controlButton} aria-label="Fullscreen">
+            {castSupported() && cast.status !== "unavailable" && (
+              <button
+                onClick={() => (casting ? cast.stop() : startCasting())}
+                className={clsx(controlButton, casting && "text-primary")}
+                aria-label={casting ? "Stop casting" : "Cast"}
+                title={casting ? `Casting to ${cast.device}` : "Cast to a device"}
+              >
+                <CastGlyph connected={casting} className="size-7" />
+              </button>
+            )}
+            <button onClick={toggleFullscreen} className={controlButton} aria-label="Fullscreen" title="Fullscreen (F)">
               {fullscreen ? <CollapseGlyph className="size-7" /> : <ExpandGlyph className="size-7" />}
             </button>
           </div>
         </div>
       </div>
+
+      <ContextMenu at={menuAt} items={contextItems} onClose={() => setMenuAt(null)} />
+      <ShortcutsDialog open={shortcuts} onClose={() => setShortcuts(false)} />
     </div>
   );
 };

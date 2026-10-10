@@ -59,19 +59,6 @@ export const VolumeGlyph = ({ level, ...props }: P & { level: number }) => (
   </svg>
 );
 
-export const SubtitlesGlyph = (props: P) => (
-  <svg {...base(props)}>
-    <rect x="3" y="5" width="18" height="14" rx="3" />
-    <path d="M7 13h4M13.5 13H17M7 16h7" />
-  </svg>
-);
-
-export const AudioGlyph = (props: P) => (
-  <svg {...base(props)}>
-    <path d="M4 10v4M8 7v10M12 4v16M16 8v8M20 11v2" />
-  </svg>
-);
-
 export const NextGlyph = (props: P) => (
   <svg {...base(props)}>
     <path d="M5 5.8c0-.8.9-1.3 1.6-.9l9 5.4c.7.4.7 1.4 0 1.8l-9 5.4c-.7.4-1.6-.1-1.6-.9z" fill="currentColor" />
@@ -91,15 +78,55 @@ export const CollapseGlyph = (props: P) => (
   </svg>
 );
 
-export const InfoGlyph = (props: P) => (
-  <svg {...base(props)}>
-    <circle cx="12" cy="12" r="9" />
-    <path d="M12 11v5M12 7.8v.2" />
-  </svg>
-);
-
 export const BackGlyph = (props: P) => (
   <svg {...base(props)}>
     <path d="M15 5 8 12l7 7" />
+  </svg>
+);
+
+export const GearGlyph = (props: P) => (
+  <svg {...base(props)}>
+    <path d="M10.3 3.6a1.8 1.8 0 0 1 3.4 0l.3.9a1.8 1.8 0 0 0 2.4 1l.8-.4a1.8 1.8 0 0 1 2.4 2.4l-.4.8a1.8 1.8 0 0 0 1 2.4l.9.3a1.8 1.8 0 0 1 0 3.4l-.9.3a1.8 1.8 0 0 0-1 2.4l.4.8a1.8 1.8 0 0 1-2.4 2.4l-.8-.4a1.8 1.8 0 0 0-2.4 1l-.3.9a1.8 1.8 0 0 1-3.4 0l-.3-.9a1.8 1.8 0 0 0-2.4-1l-.8.4a1.8 1.8 0 0 1-2.4-2.4l.4-.8a1.8 1.8 0 0 0-1-2.4l-.9-.3a1.8 1.8 0 0 1 0-3.4l.9-.3a1.8 1.8 0 0 0 1-2.4l-.4-.8a1.8 1.8 0 0 1 2.4-2.4l.8.4a1.8 1.8 0 0 0 2.4-1z" />
+    <circle cx="12" cy="12" r="3" />
+  </svg>
+);
+
+export const PipGlyph = (props: P) => (
+  <svg {...base(props)}>
+    <rect x="3" y="5" width="18" height="14" rx="2.5" />
+    <rect x="12" y="11.5" width="6.5" height="5" rx="1" fill="currentColor" stroke="none" />
+  </svg>
+);
+
+export const CastGlyph = ({ connected, ...props }: P & { connected?: boolean }) => (
+  <svg {...base(props)}>
+    <path d="M3 8V6.5A1.5 1.5 0 0 1 4.5 5h15A1.5 1.5 0 0 1 21 6.5v11a1.5 1.5 0 0 1-1.5 1.5H14" />
+    <path d="M3 12a7 7 0 0 1 7 7M3 15.5A3.5 3.5 0 0 1 6.5 19" />
+    <circle cx="3.5" cy="18.5" r=".5" fill="currentColor" />
+    {connected && <path d="M6.5 8.5h11v7H14" fill="currentColor" fillOpacity=".35" stroke="none" />}
+  </svg>
+);
+
+export const CaptionsGlyph = ({ on, ...props }: P & { on?: boolean }) => (
+  <svg {...base(props)}>
+    <rect x="3" y="5" width="18" height="14" rx="3" fill={on ? "currentColor" : "none"} />
+    <path
+      d="M10.5 10.2a2.3 2.3 0 1 0 0 3.6M17 10.2a2.3 2.3 0 1 0 0 3.6"
+      stroke={on ? "#000" : "currentColor"}
+      strokeWidth="1.8"
+      transform="translate(-1.5 0)"
+    />
+  </svg>
+);
+
+export const ChevronRightGlyph = (props: P) => (
+  <svg {...base(props)}>
+    <path d="m9 6 6 6-6 6" />
+  </svg>
+);
+
+export const ChevronLeftGlyph = (props: P) => (
+  <svg {...base(props)}>
+    <path d="m15 6-6 6 6 6" />
   </svg>
 );
