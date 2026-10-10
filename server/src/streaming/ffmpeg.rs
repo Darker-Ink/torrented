@@ -91,7 +91,8 @@ impl MediaTools {
             .await
             .map_err(|_| anyhow::anyhow!("ffprobe timed out waiting for torrent data"))??;
         if !out.status.success() {
-            let err = String::from_utf8_lossy(&out.stderr);
+            // Don't leak the internal URL (it carries a key) into messages.
+            let err = String::from_utf8_lossy(&out.stderr).replace(url, "input");
             bail!("ffprobe failed: {}", err.trim());
         }
         let v: Value = serde_json::from_slice(&out.stdout).context("parsing ffprobe output")?;

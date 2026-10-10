@@ -36,6 +36,11 @@ pub struct Config {
     #[arg(long, env = "TORRENTED_PEER_PORT")]
     pub peer_port: Option<u16>,
 
+    /// Peers to always try for every torrent (e.g. a seedbox), as ip:port.
+    /// Can be given multiple times or comma separated.
+    #[arg(long = "peer", env = "TORRENTED_PEERS", value_delimiter = ',')]
+    pub peers: Vec<std::net::SocketAddr>,
+
     /// Path to the ffmpeg binary used for probing and remuxing.
     #[arg(long, env = "TORRENTED_FFMPEG", default_value = "ffmpeg")]
     pub ffmpeg: String,

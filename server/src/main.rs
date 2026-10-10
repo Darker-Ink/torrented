@@ -32,7 +32,7 @@ async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
             EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| EnvFilter::new("info,librqbit=warn,librqbit_dht=warn,tower_http=warn")),
+                .unwrap_or_else(|_| EnvFilter::new("info,librqbit=warn,librqbit_dht=warn,librqbit_utp=error,tower_http=warn")),
         )
         .init();
 
@@ -53,7 +53,13 @@ async fn main() -> anyhow::Result<()> {
 
     let settings = Settings::load(main_db.clone(), &config).await?;
     let tools = MediaTools::detect(&config.ffmpeg, &config.ffprobe).await;
-    let engine = TorrentEngine::start(&config.data_dir, config.cache_dir(), config.peer_port).await?;
+    let engine = TorrentEngine::start(
+        &config.data_dir,
+        config.cache_dir(),
+        config.peer_port,
+        config.peers.clone(),
+    )
+    .await?;
 
     let http = reqwest::Client::builder()
         .user_agent(concat!("torrented/", env!("CARGO_PKG_VERSION")))

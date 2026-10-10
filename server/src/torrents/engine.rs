@@ -97,6 +97,7 @@ pub struct FileProgress {
 
 pub struct TorrentEngine {
     session: Arc<Session>,
+    static_peers: Vec<SocketAddr>,
     cache_dir: PathBuf,
     entries: Mutex<HashMap<String, Entry>>,
     add_lock: tokio::sync::Mutex<()>,
@@ -104,7 +105,12 @@ pub struct TorrentEngine {
 
 
 impl TorrentEngine {
-    pub async fn start(data_dir: &Path, cache_dir: PathBuf, peer_port: Option<u16>) -> anyhow::Result<Arc<Self>> {
+    pub async fn start(
+        data_dir: &Path,
+        cache_dir: PathBuf,
+        peer_port: Option<u16>,
+        static_peers: Vec<SocketAddr>,
+    ) -> anyhow::Result<Arc<Self>> {
         // Nothing in the cache survives a restart.
         if cache_dir.exists() {
             tokio::fs::remove_dir_all(&cache_dir)
@@ -114,6 +120,11 @@ impl TorrentEngine {
         tokio::fs::create_dir_all(&cache_dir).await?;
 
         let listen_addr: SocketAddr = ([0, 0, 0, 0], peer_port.unwrap_or(0)).into();
+        // Local service discovery always uses IPv6 multicast.
+        let ipv6 = std::net::UdpSocket::bind("[::]:0").is_ok();
+        if !ipv6 {
+            tracing::info!("IPv6 is unavailable on this host; using IPv4 only");
+        }
         let opts = SessionOptions {
             dht: Some(DhtSessionConfig {
                 persistence: Some(DhtPersistenceConfig {
@@ -132,6 +143,7 @@ impl TorrentEngine {
                 ..Default::default()
             }),
             ipv4_only: true,
+            disable_local_service_discovery: !ipv6,
             // Each open stream holds one of these permits while it's alive.
             runtime_worker_threads: Some(256),
             peer_limit: Some(120),
@@ -145,10 +157,15 @@ impl TorrentEngine {
 
         Ok(Arc::new(Self {
             session,
+            static_peers,
             cache_dir,
             entries: Mutex::new(HashMap::new()),
             add_lock: tokio::sync::Mutex::new(()),
         }))
+    }
+
+    fn initial_peers(&self) -> Option<Vec<SocketAddr>> {
+        (!self.static_peers.is_empty()).then(|| self.static_peers.clone())
     }
 
     pub fn listen_addr(&self) -> Option<SocketAddr> {
@@ -174,6 +191,7 @@ impl TorrentEngine {
         };
         let opts = AddTorrentOptions {
             list_only: true,
+            initial_peers: self.initial_peers(),
             ..Default::default()
         };
         let res = tokio::time::timeout(RESOLVE_TIMEOUT, self.session.add_torrent(add, Some(opts)))
@@ -290,6 +308,7 @@ impl TorrentEngine {
             only_files: Some(vec![file_index]),
             overwrite: true,
             output_folder: Some(output.to_string_lossy().into_owned()),
+            initial_peers: self.initial_peers(),
             ..Default::default()
         };
         let res = self
