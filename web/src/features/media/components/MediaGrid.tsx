@@ -1,5 +1,6 @@
 import type { MediaCard } from "@/lib/types";
 import PosterCard from "./PosterCard";
+import { titleUrl } from "@/lib/urls";
 
 type Props = { items: MediaCard[] };
 
@@ -8,7 +9,7 @@ const MediaGrid = ({ items }: Props) => (
     {items.map((m) => (
       <PosterCard
         key={m.id}
-        to={`/title/${m.id}`}
+        to={titleUrl(m)}
         title={m.title}
         year={m.year}
         poster={m.poster_path}

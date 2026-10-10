@@ -21,7 +21,7 @@ const useInvalidate = (mediaId: number) => {
   const client = useQueryClient();
   return () => {
     client.invalidateQueries({ queryKey: ["sources", mediaId] });
-    client.invalidateQueries({ queryKey: ["title", mediaId] });
+    client.invalidateQueries({ queryKey: ["title"] });
     client.invalidateQueries({ queryKey: ["episodes", mediaId] });
     client.invalidateQueries({ queryKey: ["home"] });
   };

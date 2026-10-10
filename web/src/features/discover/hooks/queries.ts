@@ -45,6 +45,7 @@ const useInvalidateDiscovery = () => {
     client.invalidateQueries({ queryKey: ["requests"] });
     client.invalidateQueries({ queryKey: ["home"] });
     client.invalidateQueries({ queryKey: ["library"] });
+    client.invalidateQueries({ queryKey: ["title"] });
   };
 };
 

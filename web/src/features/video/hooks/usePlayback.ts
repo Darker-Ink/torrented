@@ -13,10 +13,11 @@ export const clientCaps = () => {
   };
 };
 
-export const usePlayInfo = (fileId: number) =>
+export const usePlayInfo = (fileId: number | null) =>
   useQuery({
     queryKey: ["play", fileId],
     queryFn: () => api.get<PlayInfo>(`/play/${fileId}${qs(clientCaps())}`),
+    enabled: fileId !== null,
     staleTime: Infinity,
     gcTime: 0,
     retry: false,

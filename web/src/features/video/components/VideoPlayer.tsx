@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { episodeCode, formatBytes, formatClock } from "@/lib/format";
 import type { PlayInfo } from "@/lib/types";
+import { titleUrl, watchUrl } from "@/lib/urls";
 import { reportProgress } from "../hooks/usePlayback";
 import { useSubtitles } from "../hooks/useSubtitles";
 import BufferingOverlay from "./BufferingOverlay";
@@ -26,7 +27,7 @@ import {
 import TrackMenu, { controlButton, glassPanel } from "./TrackMenu";
 import UpNext from "./UpNext";
 
-type Props = { info: PlayInfo };
+type Props = { info: PlayInfo; startAt?: number | null };
 
 const VOLUME_KEY = "torrented.volume";
 const SUBS_KEY = "torrented.subtitles";
@@ -50,7 +51,12 @@ const storage = {
 
 type Flash = { kind: "play" | "pause" | "back" | "forward"; key: number };
 
-const VideoPlayer = ({ info }: Props) => {
+const VideoPlayer = ({ info: original, startAt }: Props) => {
+  // A ?t= in the link overrides the saved position.
+  const info = useMemo(
+    () => (startAt && startAt > 0 ? { ...original, resume_at: startAt } : original),
+    [original, startAt],
+  );
   const navigate = useNavigate();
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -189,12 +195,19 @@ const VideoPlayer = ({ info }: Props) => {
   const goNext = useCallback(() => {
     if (!info.next) return;
     report();
-    navigate(`/watch/${info.next.file_id}`, { replace: true });
-  }, [info.next, navigate, report]);
+    navigate(
+      watchUrl(info.media, {
+        season: info.next.season_number,
+        episode: info.next.episode_number,
+        version: info.info_hash,
+      }),
+      { replace: true },
+    );
+  }, [info.next, info.media, info.info_hash, navigate, report]);
 
   const goBack = () => {
     report();
-    navigate(`/title/${info.media.id}`);
+    navigate(titleUrl(info.media));
   };
 
   // Keyboard shortcuts.
@@ -587,7 +600,7 @@ const VideoPlayer = ({ info }: Props) => {
                 <div>
                   <p className="font-semibold">{modeLabel}</p>
                   <p className="mt-0.5 text-xs text-white/55">
-                    {compat && info.mode === "direct" ? "Compatibility mode — repackaged by the server" : info.reason}
+                    {compat && info.mode === "direct" ? "Compatibility mode, repackaged by the server" : info.reason}
                   </p>
                 </div>
                 <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-xs">
@@ -596,9 +609,9 @@ const VideoPlayer = ({ info }: Props) => {
                     {info.file.path.split("/").pop()}
                   </dd>
                   <dt className="text-white/45">Video</dt>
-                  <dd>{[info.file.resolution, info.file.video_codec?.toUpperCase()].filter(Boolean).join(" · ") || "—"}</dd>
+                  <dd>{[info.file.resolution, info.file.video_codec?.toUpperCase()].filter(Boolean).join(" · ") || "Unknown"}</dd>
                   <dt className="text-white/45">Audio</dt>
-                  <dd>{info.file.audio_codec?.toUpperCase() ?? "—"}</dd>
+                  <dd>{info.file.audio_codec?.toUpperCase() ?? "Unknown"}</dd>
                   <dt className="text-white/45">Size</dt>
                   <dd>{formatBytes(info.file.size)}</dd>
                 </dl>

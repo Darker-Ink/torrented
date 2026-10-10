@@ -1,10 +1,11 @@
 import PosterCard, { AvailableBadge, PendingBadge } from "@/features/media/components/PosterCard";
 import type { DiscoverItem } from "@/lib/types";
+import { titleUrl } from "@/lib/urls";
 
 type Props = { item: DiscoverItem; className?: string };
 
 const DiscoverCard = ({ item, className }: Props) => {
-  const to = item.media_id ? `/title/${item.media_id}` : `/discover/${item.kind}/${item.tmdb_id}`;
+  const to = titleUrl(item);
   const badge = item.available ? (
     <AvailableBadge />
   ) : item.media_id ? (

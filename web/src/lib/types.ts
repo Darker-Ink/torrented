@@ -76,6 +76,7 @@ export type Season = {
 export type PlayableFile = {
   file_id: number;
   torrent_id: number;
+  info_hash: string;
   torrent_name: string;
   path: string;
   size: number;
@@ -312,6 +313,7 @@ export type SubtitleOption = {
 
 export type PlayInfo = {
   file_id: number;
+  info_hash: string;
   session_id: number;
   mode: "direct" | "remux" | "transcode";
   reason: string;

@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { episodeCode } from "@/lib/format";
 import { img } from "@/lib/images";
 import type { ContinueItem } from "@/lib/types";
+import { watchUrl } from "@/lib/urls";
 
 type Props = { item: ContinueItem };
 
@@ -10,7 +11,7 @@ const ContinueCard = ({ item }: Props) => {
   const { media, target } = item;
   const pct = item.duration ? Math.min(100, (item.position / item.duration) * 100) : 0;
   const isEpisode = media.kind === "tv" && target.season_number >= 0;
-  const to = `/title/${media.id}?play=1${isEpisode ? `&s=${target.season_number}&e=${target.episode_number}` : ""}`;
+  const to = isEpisode ? watchUrl(media, { season: target.season_number, episode: target.episode_number }) : watchUrl(media);
 
   return (
     <Link

@@ -10,6 +10,7 @@ import { api } from "@/lib/api";
 import { formatBytes, timeAgo } from "@/lib/format";
 import { img } from "@/lib/images";
 import { PERM } from "@/lib/permissions";
+import { titleUrl } from "@/lib/urls";
 
 const TorrentsPage = () => {
   const { data: torrents } = useAllTorrents();
@@ -59,7 +60,7 @@ const TorrentsPage = () => {
           <ul className="divide-y divide-line">
             {torrents.map((t) => (
               <li key={t.id} className="flex items-center gap-4 px-4 py-3">
-                <Link to={`/title/${t.media_id}`} className="w-10 shrink-0">
+                <Link to={titleUrl({ kind: t.media_kind, tmdb_id: t.media_tmdb_id, title: t.media_title })} className="w-10 shrink-0">
                   {t.poster_path ? (
                     <img src={img(t.poster_path, "w92")} alt="" className="aspect-[2/3] w-full rounded object-cover" />
                   ) : (
@@ -71,7 +72,7 @@ const TorrentsPage = () => {
                     {t.name}
                   </p>
                   <p className="truncate text-xs text-muted">
-                    <Link to={`/title/${t.media_id}`} className="hover:text-primary">
+                    <Link to={titleUrl({ kind: t.media_kind, tmdb_id: t.media_tmdb_id, title: t.media_title })} className="hover:text-primary">
                       {t.media_title}
                     </Link>{" "}
                     · {formatBytes(t.total_size)} · {t.file_count} files · {timeAgo(t.added_at)}

@@ -3,13 +3,14 @@ import clsx from "clsx";
 import { Link } from "react-router-dom";
 import { img } from "@/lib/images";
 import type { MediaCard as Card } from "@/lib/types";
+import { titleUrl } from "@/lib/urls";
 
 type Props = { item: Card; className?: string };
 
 /** Landscape card used in rows. */
 const MediaCard = ({ item, className }: Props) => (
   <Link
-    to={`/title/${item.id}`}
+    to={titleUrl(item)}
     className={clsx(
       "group/card relative block aspect-video w-64 shrink-0 snap-start overflow-hidden rounded-md bg-surface ring-1 ring-line transition duration-300 hover:z-10 hover:scale-[1.04] hover:ring-primary/40 sm:w-72",
       !item.available && "opacity-70 hover:opacity-100",

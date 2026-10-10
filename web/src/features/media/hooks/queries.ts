@@ -4,11 +4,12 @@ import type { Episode, Home, MediaCard, MediaKind, TitleDetail } from "@/lib/typ
 
 export const useHome = () => useQuery({ queryKey: ["home"], queryFn: () => api.get<Home>("/library/home") });
 
-export const useTitle = (id: number) =>
+export const useTitleByTmdb = (kind: MediaKind | null, tmdbId: number | null) =>
   useQuery({
-    queryKey: ["title", id],
-    queryFn: () => api.get<TitleDetail>(`/library/${id}`),
-    enabled: Number.isFinite(id),
+    queryKey: ["title", kind, tmdbId],
+    queryFn: () => api.get<TitleDetail>(`/library/by-tmdb/${kind}/${tmdbId}`),
+    enabled: !!kind && tmdbId !== null,
+    retry: false,
   });
 
 export const useEpisodes = (id: number, season: number | null) =>

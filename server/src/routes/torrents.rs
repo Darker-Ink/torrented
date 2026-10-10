@@ -254,11 +254,12 @@ async fn list_all(State(state): State<AppState>, CurrentUser(user): CurrentUser)
         media_id: i64,
         media_title: String,
         media_kind: String,
+        media_tmdb_id: i64,
         poster_path: Option<String>,
     }
     let rows: Vec<Row> = sqlx::query_as(
         "SELECT t.id, t.info_hash, t.name, t.total_size, t.file_count, t.resolution, t.added_at,
-                m.id AS media_id, m.title AS media_title, m.kind AS media_kind, m.poster_path
+                m.id AS media_id, m.title AS media_title, m.kind AS media_kind, m.tmdb_id AS media_tmdb_id, m.poster_path
          FROM torrents t JOIN media m ON m.id = t.media_id ORDER BY t.added_at DESC",
     )
     .fetch_all(&state.media)

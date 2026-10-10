@@ -10,9 +10,11 @@ type Props = {
   meta?: ReactNode[];
   genres?: string[];
   children?: ReactNode;
+  /** Short status line under the actions. */
+  note?: ReactNode;
 };
 
-const TitleHeader = ({ title, backdrop, logo, tagline, overview, meta = [], genres = [], children }: Props) => (
+const TitleHeader = ({ title, backdrop, logo, tagline, overview, meta = [], genres = [], children, note }: Props) => (
   <section className="relative min-h-[72vh] w-full overflow-hidden">
     {backdrop && <img src={img(backdrop, "original")} alt="" className="absolute inset-0 size-full object-cover" />}
     <div className="absolute inset-0 bg-gradient-to-r from-bg via-bg/75 to-bg/10" />
@@ -39,6 +41,7 @@ const TitleHeader = ({ title, backdrop, logo, tagline, overview, meta = [], genr
       {overview && <p className="max-w-2xl text-base leading-relaxed text-fg/85">{overview}</p>}
       {genres.length > 0 && <p className="text-sm text-muted">{genres.join(" · ")}</p>}
       {children && <div className="flex flex-wrap items-center gap-3 pt-1">{children}</div>}
+      {note && <div className="-mt-1 flex items-center gap-2 text-sm text-fg/60">{note}</div>}
     </div>
   </section>
 );

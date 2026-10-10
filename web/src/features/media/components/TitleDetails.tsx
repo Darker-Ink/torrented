@@ -19,6 +19,7 @@ type Props = {
   genres?: string[];
   cast: CastMember[];
   seasons?: number;
+  footer?: React.ReactNode;
 };
 
 const languageName = (code?: string | null) => {
@@ -75,8 +76,8 @@ const TitleDetails = (p: Props) => {
   const imdbUrl = p.imdbId ? `https://www.imdb.com/title/${p.imdbId}` : null;
   return (
     <div className="grid gap-10 lg:grid-cols-[minmax(0,1fr)_340px]">
-      <div className="space-y-8">
-        <h3 className="-mb-3 text-sm font-semibold text-fg/90">About</h3>
+      <div className="space-y-6">
+        <h3 className="text-sm font-semibold text-fg/90">About</h3>
         <dl className="grid grid-cols-2 gap-x-8 gap-y-5 sm:grid-cols-3">
           <Fact label={p.kind === "tv" ? "First aired" : "Released"}>{p.releaseDate ? formatDate(p.releaseDate) : null}</Fact>
           <Fact label={p.kind === "tv" ? "Episode length" : "Runtime"}>{formatRuntime(p.runtime)}</Fact>
@@ -123,6 +124,7 @@ const TitleDetails = (p: Props) => {
             </a>
           )}
         </div>
+        {p.footer}
       </div>
       {p.cast.length > 0 && (
         <aside className="lg:border-l lg:border-white/[0.06] lg:pl-8">

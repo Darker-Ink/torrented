@@ -6,10 +6,17 @@ import FieldWrap, { Textarea } from "@/features/ui/components/Field";
 import Modal from "@/features/ui/components/Modal";
 import { toast } from "@/features/ui/components/Toaster";
 import { errorMessage } from "@/lib/api";
-import type { DiscoverDetail } from "@/lib/types";
+import type { MediaKind } from "@/lib/types";
+
+export type RequestTarget = {
+  kind: MediaKind;
+  tmdb_id: number;
+  title: string;
+  seasons: { season_number: number; name: string | null }[];
+};
 import { useCreateRequest } from "../hooks/queries";
 
-type Props = { open: boolean; onClose: () => void; title: DiscoverDetail };
+type Props = { open: boolean; onClose: () => void; title: RequestTarget };
 
 const RequestDialog = ({ open, onClose, title }: Props) => {
   const seasons = title.seasons.filter((s) => s.season_number > 0);
@@ -73,7 +80,7 @@ const RequestDialog = ({ open, onClose, title }: Props) => {
             </div>
           </div>
         )}
-        <FieldWrap label="Note" description="Optional — e.g. preferred quality or language.">
+        <FieldWrap label="Note" description="Optional, e.g. preferred quality or language.">
           <Textarea value={note} onChange={(e) => setNote(e.target.value)} maxLength={500} />
         </FieldWrap>
       </div>

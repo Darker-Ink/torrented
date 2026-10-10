@@ -6,6 +6,7 @@ import Button from "@/features/ui/components/Button";
 import { formatRuntime } from "@/lib/format";
 import { img } from "@/lib/images";
 import type { MediaCard } from "@/lib/types";
+import { titleUrl, watchUrl } from "@/lib/urls";
 
 type Props = { items: MediaCard[] };
 
@@ -61,10 +62,10 @@ const Hero = ({ items }: Props) => {
         </div>
         {item.overview && <p className="line-clamp-3 max-w-xl text-base text-fg/85 text-shadow">{item.overview}</p>}
         <div className="flex gap-3">
-          <Button variant="light" size="lg" onClick={() => navigate(`/title/${item.id}?play=1`)}>
+          <Button variant="light" size="lg" onClick={() => navigate(watchUrl(item))}>
             <PlayIcon className="size-6" /> Play
           </Button>
-          <Button variant="secondary" size="lg" onClick={() => navigate(`/title/${item.id}`)}>
+          <Button variant="secondary" size="lg" onClick={() => navigate(titleUrl(item))}>
             <InformationCircleIcon className="size-6" /> More info
           </Button>
         </div>
@@ -82,7 +83,7 @@ const Hero = ({ items }: Props) => {
           ))}
         </div>
       )}
-      <Link to={`/title/${item.id}`} className="sr-only">
+      <Link to={titleUrl(item)} className="sr-only">
         {item.title}
       </Link>
     </section>

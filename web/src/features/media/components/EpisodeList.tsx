@@ -7,20 +7,25 @@ import Badge from "@/features/ui/components/Badge";
 import Skeleton from "@/features/ui/components/Skeleton";
 import { formatBytes, formatDate } from "@/lib/format";
 import { img } from "@/lib/images";
-import type { Episode } from "@/lib/types";
+import type { Episode, MediaKind } from "@/lib/types";
+import { watchUrl } from "@/lib/urls";
 import { useMarkWatched } from "../hooks/queries";
 
-type Props = { mediaId: number; episodes?: Episode[]; loading?: boolean; fallbackImage?: string | null };
+type MediaRef = { id: number; kind: MediaKind; tmdb_id: number; title: string };
+
+type Props = { media: MediaRef; episodes?: Episode[]; loading?: boolean; fallbackImage?: string | null };
 
 const menuItem = "flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-sm data-[focus]:bg-white/[0.07]";
 
-const EpisodeRow = ({ ep, mediaId, fallbackImage }: { ep: Episode; mediaId: number; fallbackImage?: string | null }) => {
+const EpisodeRow = ({ ep, media, fallbackImage }: { ep: Episode; media: MediaRef; fallbackImage?: string | null }) => {
+  const mediaId = media.id;
   const navigate = useNavigate();
   const mark = useMarkWatched();
   const playable = ep.files.length > 0;
   const progress = ep.progress;
   const pct = progress?.completed ? 100 : progress?.duration ? (progress.position / progress.duration) * 100 : 0;
-  const play = (fileId: number) => navigate(`/watch/${fileId}`);
+  const play = (version?: string) =>
+    navigate(watchUrl(media, { season: ep.season_number, episode: ep.episode_number, version }));
   const best = ep.files[0];
 
   return (
@@ -33,7 +38,7 @@ const EpisodeRow = ({ ep, mediaId, fallbackImage }: { ep: Episode; mediaId: numb
       <span className="hidden w-8 shrink-0 text-center text-2xl font-light text-muted sm:block">{ep.episode_number}</span>
       <button
         disabled={!playable}
-        onClick={() => best && play(best.file_id)}
+        onClick={() => best && play()}
         className="relative aspect-video w-36 shrink-0 overflow-hidden rounded-md bg-surface sm:w-44"
       >
         {(ep.still_path || fallbackImage) && (
@@ -88,7 +93,7 @@ const EpisodeRow = ({ ep, mediaId, fallbackImage }: { ep: Episode; mediaId: numb
               {ep.files.length > 1 &&
                 ep.files.map((f) => (
                   <MenuItem key={f.file_id}>
-                    <button className={menuItem} onClick={() => play(f.file_id)}>
+                    <button className={menuItem} onClick={() => play(f.info_hash)}>
                       <PlayIcon className="size-4 shrink-0 text-muted" />
                       <span className="min-w-0">
                         <span className="block truncate">
@@ -126,7 +131,7 @@ const EpisodeRow = ({ ep, mediaId, fallbackImage }: { ep: Episode; mediaId: numb
   );
 };
 
-const EpisodeList = ({ mediaId, episodes, loading, fallbackImage }: Props) => {
+const EpisodeList = ({ media, episodes, loading, fallbackImage }: Props) => {
   if (loading || !episodes) {
     return (
       <div className="space-y-3">
@@ -140,7 +145,7 @@ const EpisodeList = ({ mediaId, episodes, loading, fallbackImage }: Props) => {
   return (
     <div className="divide-y divide-line/60">
       {episodes.map((ep) => (
-        <EpisodeRow key={ep.id} ep={ep} mediaId={mediaId} fallbackImage={fallbackImage} />
+        <EpisodeRow key={ep.id} ep={ep} media={media} fallbackImage={fallbackImage} />
       ))}
     </div>
   );

@@ -55,6 +55,7 @@ export type AdminTorrent = {
   media_id: number;
   media_title: string;
   media_kind: "movie" | "tv";
+  media_tmdb_id: number;
   poster_path: string | null;
   job: TorrentJob | null;
 };
