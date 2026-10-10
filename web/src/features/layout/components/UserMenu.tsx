@@ -15,7 +15,7 @@ import Avatar from "./Avatar";
 type Props = { user: User };
 
 const itemClass =
-  "flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-sm text-fg/90 data-[focus]:bg-white/[0.07] data-[focus]:text-fg";
+  "flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm text-fg/85 data-[focus]:bg-white/[0.07] data-[focus]:text-fg";
 
 const UserMenu = ({ user }: Props) => {
   const client = useQueryClient();
@@ -29,17 +29,22 @@ const UserMenu = ({ user }: Props) => {
 
   return (
     <Menu>
-      <MenuButton className="flex items-center gap-2 rounded-md p-0.5 transition hover:opacity-90">
+      <MenuButton className="rounded-full ring-2 ring-transparent transition hover:ring-white/20 data-[open]:ring-primary/60">
         <Avatar name={name} />
       </MenuButton>
       <MenuItems
         anchor="bottom end"
         transition
-        className="z-50 mt-2 w-56 rounded-lg border border-line bg-surface p-1.5 shadow-xl shadow-black/50 transition duration-100 focus:outline-none data-[closed]:scale-95 data-[closed]:opacity-0"
+        className="z-50 mt-2.5 w-60 rounded-xl border border-white/10 bg-surface/95 p-1.5 shadow-2xl shadow-black/60 backdrop-blur-xl transition duration-100 focus:outline-none data-[closed]:-translate-y-1 data-[closed]:opacity-0"
       >
-        <div className="px-2.5 py-2">
-          <p className="truncate text-sm font-semibold">{name}</p>
-          <p className="truncate text-xs text-muted capitalize">{user.role}</p>
+        <div className="flex items-center gap-3 px-2.5 py-2">
+          <Avatar name={name} className="size-9" />
+          <div className="min-w-0">
+            <p className="truncate text-sm font-semibold">{name}</p>
+            <p className="truncate text-xs text-muted">
+              @{user.username} · <span className="capitalize">{user.role}</span>
+            </p>
+          </div>
         </div>
         <MenuSeparator className="my-1 h-px bg-line" />
         <MenuItem>
