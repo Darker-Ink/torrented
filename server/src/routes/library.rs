@@ -26,6 +26,8 @@ pub fn router() -> Router<AppState> {
         .route("/library/{id}", get(detail).delete(remove))
         .route("/library/{id}/refresh", post(refresh))
         .route("/library/{id}/episodes", get(episodes))
+        .route("/library/by-tmdb/{kind}/{tmdb_id}", get(detail_by_tmdb))
+        .route("/play/resolve", get(resolve))
 }
 
 #[derive(Debug, Clone, Serialize, sqlx::FromRow)]
@@ -389,6 +391,110 @@ async fn detail(
     CurrentUser(user): CurrentUser,
     Path(id): Path<i64>,
 ) -> AppResult<Json<Value>> {
+    detail_json(&state, &user, id).await.map(Json)
+}
+
+/// Title page lookup by TMDB id, which is the same on every instance so
+/// links can be shared between servers.
+async fn detail_by_tmdb(
+    State(state): State<AppState>,
+    CurrentUser(user): CurrentUser,
+    Path((kind, tmdb_id)): Path<(String, i64)>,
+) -> AppResult<Json<Value>> {
+    let kind = MediaKind::parse(&kind).ok_or_else(|| AppError::bad_request("kind must be movie or tv"))?;
+    let id = library::find_by_tmdb(&state.media, kind, tmdb_id)
+        .await?
+        .ok_or_else(|| AppError::not_found("not in the library"))?;
+    detail_json(&state, &user, id).await.map(Json)
+}
+
+async fn latest_progress(state: &AppState, user: &User, kind: &str, tmdb_id: i64) -> AppResult<Option<Progress>> {
+    Ok(sqlx::query_as(
+        "SELECT kind, tmdb_id, season_number, episode_number, info_hash, file_index, position, duration,
+                completed, updated_at
+         FROM watch_progress WHERE user_id = ? AND kind = ? AND tmdb_id = ? ORDER BY updated_at DESC LIMIT 1",
+    )
+    .bind(user.id)
+    .bind(kind)
+    .bind(tmdb_id)
+    .fetch_optional(&state.main)
+    .await?)
+}
+
+#[derive(Deserialize)]
+struct ResolveQuery {
+    kind: String,
+    tmdb_id: i64,
+    season: Option<i64>,
+    episode: Option<i64>,
+    /// Prefix of the torrent's info hash, to pick a specific version.
+    v: Option<String>,
+}
+
+/// Turn a shareable watch link (title + episode + optional version) into the
+/// file to play on this instance. Without an episode, picks up where the
+/// user left off.
+async fn resolve(
+    State(state): State<AppState>,
+    CurrentUser(user): CurrentUser,
+    Query(q): Query<ResolveQuery>,
+) -> AppResult<Json<Value>> {
+    user.require(perm::STREAM)?;
+    let kind = MediaKind::parse(&q.kind).ok_or_else(|| AppError::bad_request("kind must be movie or tv"))?;
+    let media_id = library::find_by_tmdb(&state.media, kind, q.tmdb_id)
+        .await?
+        .ok_or_else(|| AppError::not_found("this title isn't in the library"))?;
+    let version = q.v.as_deref().map(str::to_lowercase).filter(|v| v.len() >= 4);
+    let pick = |files: Vec<files::PlayableFile>| {
+        let chosen = version
+            .as_ref()
+            .and_then(|v| files.iter().find(|f| f.info_hash.starts_with(v.as_str())).cloned());
+        chosen.or_else(|| files.into_iter().next())
+    };
+
+    match kind {
+        MediaKind::Movie => {
+            let file = pick(files::files_for_movie(&state.media, media_id).await?)
+                .ok_or_else(|| AppError::not_found("no torrent for this movie yet"))?;
+            Ok(Json(json!({ "file_id": file.file_id, "info_hash": file.info_hash })))
+        }
+        MediaKind::Tv => {
+            let (season, episode) = match (q.season, q.episode) {
+                (Some(s), Some(e)) => (s, e),
+                _ => {
+                    let last = latest_progress(&state, &user, kind.as_str(), q.tmdb_id).await?;
+                    let next = next_up(&state, media_id, last.as_ref())
+                        .await?
+                        .ok_or_else(|| AppError::not_found("no episodes have a torrent yet"))?;
+                    (
+                        next["season_number"].as_i64().unwrap_or(1),
+                        next["episode_number"].as_i64().unwrap_or(1),
+                    )
+                }
+            };
+            let episode_id: i64 = sqlx::query_scalar(
+                "SELECT id FROM episodes WHERE media_id = ? AND season_number = ? AND episode_number = ?",
+            )
+            .bind(media_id)
+            .bind(season)
+            .bind(episode)
+            .fetch_optional(&state.media)
+            .await?
+            .ok_or_else(|| AppError::not_found("no such episode"))?;
+            let file = pick(files::files_for_episode(&state.media, episode_id).await?)
+                .ok_or_else(|| AppError::not_found("this episode doesn't have a torrent yet"))?;
+            Ok(Json(json!({
+                "file_id": file.file_id,
+                "info_hash": file.info_hash,
+                "season_number": season,
+                "episode_number": episode,
+            })))
+        }
+    }
+}
+
+async fn detail_json(state: &AppState, user: &User, id: i64) -> AppResult<Value> {
+    let state = state.clone();
     let media = library::get_media(&state.media, id).await?;
     let is_tv = media.kind == "tv";
 
@@ -456,7 +562,7 @@ async fn detail(
     .fetch_optional(&state.main)
     .await?;
 
-    Ok(Json(json!({
+    Ok(json!({
         "media": media,
         "seasons": seasons,
         "in_watchlist": in_watchlist,
@@ -465,7 +571,7 @@ async fn detail(
         "files": movie_files,
         "progress": progress.first(),
         "request": request.map(|(id, status)| json!({ "id": id, "status": status })),
-    })))
+    }))
 }
 
 /// For a show: resume the in-progress episode, otherwise the one after the

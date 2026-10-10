@@ -517,6 +517,7 @@ async fn play(
 
     Ok(Json(json!({
         "file_id": file_id,
+        "info_hash": ctx.info_hash,
         "session_id": session_id,
         "mode": plan.mode,
         "reason": plan.reason,

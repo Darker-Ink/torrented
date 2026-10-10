@@ -15,6 +15,7 @@ pub const RESOLUTION_RANK: &str = "CASE f.resolution
 pub struct PlayableFile {
     pub file_id: i64,
     pub torrent_id: i64,
+    pub info_hash: String,
     pub torrent_name: String,
     pub path: String,
     pub size: i64,
@@ -27,7 +28,7 @@ pub struct PlayableFile {
     pub release_group: Option<String>,
 }
 
-const PLAYABLE_COLUMNS: &str = "f.id AS file_id, t.id AS torrent_id, t.name AS torrent_name, f.path, f.size, \
+const PLAYABLE_COLUMNS: &str = "f.id AS file_id, t.id AS torrent_id, t.info_hash, t.name AS torrent_name, f.path, f.size, \
     f.resolution, f.video_codec, f.audio_codec, f.duration, t.source, t.hdr, t.release_group";
 
 pub async fn files_for_episode(pool: &SqlitePool, episode_id: i64) -> AppResult<Vec<PlayableFile>> {
