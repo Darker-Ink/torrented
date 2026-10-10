@@ -14,42 +14,42 @@ type Props = {
   onChange: (value: string) => void;
 };
 
+export const controlButton =
+  "grid size-11 place-items-center rounded-full text-white/85 transition hover:scale-110 hover:text-white focus:outline-none data-[focus]:ring-2 data-[focus]:ring-primary/70";
+
+export const glassPanel =
+  "z-50 rounded-2xl border border-white/10 bg-neutral-950/80 shadow-2xl shadow-black/70 backdrop-blur-xl transition data-[closed]:translate-y-1 data-[closed]:opacity-0";
+
 const TrackMenu = ({ icon, label, title, value, options, onChange }: Props) => (
   <Popover className="relative">
-    <PopoverButton
-      className="grid size-10 place-items-center rounded-full text-white/90 transition hover:bg-white/10 hover:text-white focus:outline-none"
-      aria-label={label}
-      title={label}
-    >
+    <PopoverButton className={clsx(controlButton, "data-[open]:text-primary")} aria-label={label} title={label}>
       {icon}
     </PopoverButton>
-    <PopoverPanel
-      anchor="top end"
-      transition
-      className="z-50 mb-3 w-64 rounded-lg border border-white/10 bg-black/90 p-1.5 shadow-2xl backdrop-blur-md transition data-[closed]:translate-y-1 data-[closed]:opacity-0"
-    >
+    <PopoverPanel anchor={{ to: "top end", gap: 12 }} transition className={clsx(glassPanel, "w-72 p-2")}>
       {({ close }) => (
         <>
-          <p className="px-2.5 pt-1.5 pb-2 text-xs font-semibold tracking-wide text-white/50 uppercase">{title}</p>
-          {options.map((o) => (
-            <button
-              key={o.value}
-              onClick={() => {
-                onChange(o.value);
-                close();
-              }}
-              className={clsx(
-                "flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-sm hover:bg-white/10",
-                o.value === value ? "text-white" : "text-white/70",
-              )}
-            >
-              <CheckIcon className={clsx("size-4 shrink-0 text-primary", o.value !== value && "invisible")} />
-              <span className="min-w-0">
-                <span className="block truncate">{o.label}</span>
-                {o.hint && <span className="block truncate text-xs text-white/45">{o.hint}</span>}
-              </span>
-            </button>
-          ))}
+          <p className="px-3 pt-2 pb-2.5 text-[11px] font-semibold tracking-[0.12em] text-white/45 uppercase">{title}</p>
+          <div className="max-h-80 overflow-y-auto">
+            {options.map((o) => (
+              <button
+                key={o.value}
+                onClick={() => {
+                  onChange(o.value);
+                  close();
+                }}
+                className={clsx(
+                  "flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[15px] transition hover:bg-white/[0.08]",
+                  o.value === value ? "text-white" : "text-white/65",
+                )}
+              >
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate font-medium">{o.label}</span>
+                  {o.hint && <span className="block truncate text-xs text-white/40">{o.hint}</span>}
+                </span>
+                <CheckIcon className={clsx("size-5 shrink-0 text-primary", o.value !== value && "invisible")} />
+              </button>
+            ))}
+          </div>
         </>
       )}
     </PopoverPanel>

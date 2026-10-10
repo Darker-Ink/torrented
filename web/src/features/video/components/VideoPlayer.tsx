@@ -1,17 +1,3 @@
-import {
-  ArrowLeftIcon,
-  ArrowsPointingInIcon,
-  ArrowsPointingOutIcon,
-  ChatBubbleBottomCenterTextIcon,
-  ForwardIcon,
-  InformationCircleIcon,
-  LanguageIcon,
-  PauseIcon,
-  PlayIcon,
-  SpeakerWaveIcon,
-  SpeakerXMarkIcon,
-} from "@heroicons/react/24/solid";
-import { ArrowUturnLeftIcon, ArrowUturnRightIcon } from "@heroicons/react/24/outline";
 import { Popover, PopoverButton, PopoverPanel } from "@headlessui/react";
 import clsx from "clsx";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -23,7 +9,21 @@ import { useSubtitles } from "../hooks/useSubtitles";
 import BufferingOverlay from "./BufferingOverlay";
 import CueText from "./CueText";
 import SeekBar from "./SeekBar";
-import TrackMenu from "./TrackMenu";
+import {
+  AudioGlyph,
+  BackGlyph,
+  CollapseGlyph,
+  ExpandGlyph,
+  InfoGlyph,
+  NextGlyph,
+  PauseGlyph,
+  PlayGlyph,
+  SkipBackGlyph,
+  SkipForwardGlyph,
+  SubtitlesGlyph,
+  VolumeGlyph,
+} from "./PlayerIcons";
+import TrackMenu, { controlButton, glassPanel } from "./TrackMenu";
 import UpNext from "./UpNext";
 
 type Props = { info: PlayInfo };
@@ -48,8 +48,7 @@ const storage = {
   },
 };
 
-const iconButton =
-  "grid size-10 place-items-center rounded-full text-white/90 transition hover:bg-white/10 hover:text-white focus:outline-none";
+type Flash = { kind: "play" | "pause" | "back" | "forward"; key: number };
 
 const VideoPlayer = ({ info }: Props) => {
   const navigate = useNavigate();
@@ -79,6 +78,9 @@ const VideoPlayer = ({ info }: Props) => {
   const [resumedNote, setResumedNote] = useState(validResume);
   const [upNextDismissed, setUpNextDismissed] = useState(false);
   const [countdown, setCountdown] = useState(10);
+  const [flash, setFlash] = useState<Flash | null>(null);
+  const [showRemaining, setShowRemaining] = useState(true);
+  const pulse = (kind: Flash["kind"]) => setFlash({ kind, key: Date.now() });
 
   const preferredLang = storage.get(SUBS_KEY);
   const [subtitle, setSubtitle] = useState<string>(() => {
@@ -153,8 +155,13 @@ const VideoPlayer = ({ info }: Props) => {
   const togglePlay = useCallback(() => {
     const v = videoRef.current;
     if (!v) return;
-    if (v.paused) v.play().catch(() => {});
-    else v.pause();
+    if (v.paused) {
+      v.play().catch(() => {});
+      pulse("play");
+    } else {
+      v.pause();
+      pulse("pause");
+    }
   }, []);
 
   const seek = useCallback(
@@ -205,10 +212,12 @@ const VideoPlayer = ({ info }: Props) => {
         case "ArrowLeft":
           e.preventDefault();
           seek(current - 10);
+          pulse("back");
           break;
         case "ArrowRight":
           e.preventDefault();
           seek(current + 10);
+          pulse("forward");
           break;
         case "ArrowUp":
           e.preventDefault();
@@ -313,13 +322,13 @@ const VideoPlayer = ({ info }: Props) => {
     storage.set(SUBS_KEY, value === "off" ? "off" : lang);
   };
 
-  const heading = info.episode
-    ? `${episodeCode(info.episode.season_number, info.episode.episode_numbers)}${info.episode.name ? ` · ${info.episode.name}` : ""}`
-    : info.media.year
-      ? String(info.media.year)
-      : null;
 
-  const VolumeIcon = muted || volume === 0 ? SpeakerXMarkIcon : SpeakerWaveIcon;
+  const level = muted ? 0 : volume;
+  const titleLine = info.episode ? (info.episode.name ?? `Episode ${info.episode.episode_numbers[0]}`) : info.media.title;
+  const eyebrow = info.episode
+    ? `${info.media.title} · ${episodeCode(info.episode.season_number, info.episode.episode_numbers)}`
+    : [info.media.year, info.file.resolution].filter(Boolean).join(" · ");
+  const modeLabel = mode === "direct" ? "Direct play" : mode === "remux" ? "Remux" : "Transcode";
 
   return (
     <div
@@ -363,10 +372,10 @@ const VideoPlayer = ({ info }: Props) => {
         <div
           className={clsx(
             "pointer-events-none absolute inset-x-0 flex justify-center px-8 transition-[bottom] duration-200",
-            controls ? "bottom-32" : "bottom-14",
+            controls ? "bottom-48" : "bottom-14",
           )}
         >
-          <p className="max-w-4xl rounded bg-black/65 px-3 py-1 text-center text-xl leading-snug font-medium whitespace-pre-line sm:text-2xl">
+          <p className="max-w-4xl rounded-lg bg-black/60 px-4 py-1.5 text-center text-xl leading-snug font-semibold whitespace-pre-line [text-shadow:0_1px_3px_rgb(0_0_0/0.8)] sm:text-[28px]">
             <CueText text={cueText} />
           </p>
         </div>
@@ -378,9 +387,9 @@ const VideoPlayer = ({ info }: Props) => {
         <button
           onClick={togglePlay}
           aria-label="Play"
-          className="absolute top-1/2 left-1/2 z-10 grid size-20 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full bg-black/50 text-white ring-1 ring-white/20 backdrop-blur transition hover:scale-105 hover:bg-black/70"
+          className="absolute top-1/2 left-1/2 z-10 grid size-24 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full bg-white/15 text-white ring-1 ring-white/25 backdrop-blur-md transition hover:scale-105 hover:bg-white/25"
         >
-          <PlayIcon className="ml-1 size-10" />
+          <PlayGlyph className="ml-1.5 size-12" />
         </button>
       )}
 
@@ -411,8 +420,20 @@ const VideoPlayer = ({ info }: Props) => {
         </div>
       )}
 
+      {flash && (
+        <div
+          key={flash.key}
+          className="pointer-events-none absolute top-1/2 left-1/2 z-10 grid size-24 animate-flash place-items-center rounded-full bg-black/45 backdrop-blur-sm"
+        >
+          {flash.kind === "play" && <PlayGlyph className="ml-1 size-11" />}
+          {flash.kind === "pause" && <PauseGlyph className="size-11" />}
+          {flash.kind === "back" && <SkipBackGlyph className="size-11" />}
+          {flash.kind === "forward" && <SkipForwardGlyph className="size-11" />}
+        </div>
+      )}
+
       {resumedNote && started && (
-        <div className="absolute top-24 left-1/2 z-20 flex -translate-x-1/2 animate-rise items-center gap-3 rounded-full bg-black/80 py-1.5 pr-1.5 pl-4 text-sm backdrop-blur">
+        <div className="absolute top-24 left-1/2 z-20 flex -translate-x-1/2 animate-rise items-center gap-3 rounded-full border border-white/10 bg-neutral-950/80 py-1.5 pr-1.5 pl-4 text-sm shadow-xl backdrop-blur-xl">
           Resumed from {formatClock(info.resume_at)}
           <button
             onClick={() => {
@@ -433,77 +454,114 @@ const VideoPlayer = ({ info }: Props) => {
       {/* Top bar */}
       <div
         className={clsx(
-          "absolute inset-x-0 top-0 z-10 flex items-center gap-4 bg-gradient-to-b from-black/80 to-transparent px-4 pt-4 pb-12 transition-opacity duration-300 sm:px-8",
+          "absolute inset-x-0 top-0 z-10 flex items-center justify-between bg-gradient-to-b from-black/70 to-transparent px-4 pt-5 pb-16 transition-opacity duration-300 sm:px-10",
           controls ? "opacity-100" : "pointer-events-none opacity-0",
         )}
       >
-        <button onClick={goBack} className={iconButton} aria-label="Back">
-          <ArrowLeftIcon className="size-6" />
+        <button
+          onClick={goBack}
+          className="flex items-center gap-1.5 rounded-full py-2 pr-4 pl-2 text-sm font-semibold text-white/85 transition hover:bg-white/10 hover:text-white"
+        >
+          <BackGlyph className="size-6" />
+          Back
         </button>
-        <div className="min-w-0">
-          <p className="truncate text-lg font-bold">{info.media.title}</p>
-          {heading && <p className="truncate text-sm text-white/70">{heading}</p>}
-        </div>
+        <span className="rounded-full border border-white/10 bg-black/40 px-3 py-1 text-xs font-medium text-white/70 backdrop-blur">
+          {modeLabel}
+          {info.file.resolution ? ` · ${info.file.resolution}` : ""}
+        </span>
       </div>
 
       {/* Bottom controls */}
       <div
         className={clsx(
-          "absolute inset-x-0 bottom-0 z-10 space-y-2 bg-gradient-to-t from-black/90 via-black/50 to-transparent px-4 pt-16 pb-4 transition-opacity duration-300 sm:px-8",
+          "absolute inset-x-0 bottom-0 z-10 bg-gradient-to-t from-black/90 via-black/55 to-transparent px-4 pt-24 pb-5 transition-opacity duration-300 sm:px-10 sm:pb-7",
           controls ? "opacity-100" : "pointer-events-none opacity-0",
         )}
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center gap-3">
-          <SeekBar current={current} duration={duration} buffered={buffered} onSeek={seek} />
-          <span className="w-24 shrink-0 text-right text-sm text-white/80 tabular-nums">
-            {duration ? `-${formatClock(Math.max(0, duration - current))}` : formatClock(current)}
-          </span>
+        <div className="mb-3 min-w-0">
+          {eyebrow && <p className="truncate text-sm font-medium text-white/60">{eyebrow}</p>}
+          <h1 className="truncate text-2xl font-bold tracking-tight sm:text-3xl">{titleLine}</h1>
         </div>
-        <div className="flex items-center gap-1">
-          <button onClick={togglePlay} className={iconButton} aria-label={playing ? "Pause" : "Play"}>
-            {playing ? <PauseIcon className="size-7" /> : <PlayIcon className="size-7" />}
-          </button>
-          <button onClick={() => seek(current - 10)} className={iconButton} aria-label="Back 10 seconds">
-            <ArrowUturnLeftIcon className="size-6" />
-          </button>
-          <button onClick={() => seek(current + 10)} className={iconButton} aria-label="Forward 10 seconds">
-            <ArrowUturnRightIcon className="size-6" />
-          </button>
-          <div className="group/vol flex items-center">
-            <button onClick={() => setMuted((m) => !m)} className={iconButton} aria-label={muted ? "Unmute" : "Mute"}>
-              <VolumeIcon className="size-6" />
-            </button>
-            <input
-              type="range"
-              min={0}
-              max={1}
-              step={0.02}
-              value={muted ? 0 : volume}
-              onChange={(e) => {
-                const v = Number(e.target.value);
-                setVolume(v);
-                setMuted(v === 0);
-                storage.set(VOLUME_KEY, String(v));
-              }}
-              className="w-0 accent-primary opacity-0 transition-all duration-200 group-hover/vol:w-24 group-hover/vol:opacity-100 focus:w-24 focus:opacity-100"
-              aria-label="Volume"
-            />
-          </div>
-          <span className="ml-2 hidden text-sm text-white/80 tabular-nums sm:block">
-            {formatClock(current)}
-            {duration ? ` / ${formatClock(duration)}` : ""}
-          </span>
 
-          <div className="ml-auto flex items-center gap-1">
+        <div className="flex items-center gap-4">
+          <span className="w-14 text-sm font-medium text-white/80 tabular-nums">{formatClock(current)}</span>
+          <SeekBar current={current} duration={duration} buffered={buffered} onSeek={seek} />
+          <button
+            onClick={() => setShowRemaining((r) => !r)}
+            className="w-16 text-right text-sm font-medium text-white/80 tabular-nums hover:text-white"
+            title="Toggle remaining time"
+          >
+            {duration ? (showRemaining ? `-${formatClock(Math.max(0, duration - current))}` : formatClock(duration)) : "--:--"}
+          </button>
+        </div>
+
+        <div className="mt-2 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-1 sm:gap-2">
+            <button onClick={togglePlay} className={clsx(controlButton, "size-12")} aria-label={playing ? "Pause" : "Play"}>
+              {playing ? <PauseGlyph className="size-8" /> : <PlayGlyph className="size-8" />}
+            </button>
+            <button
+              onClick={() => {
+                seek(current - 10);
+                pulse("back");
+              }}
+              className={controlButton}
+              aria-label="Back 10 seconds"
+            >
+              <SkipBackGlyph className="size-7" />
+            </button>
+            <button
+              onClick={() => {
+                seek(current + 10);
+                pulse("forward");
+              }}
+              className={controlButton}
+              aria-label="Forward 10 seconds"
+            >
+              <SkipForwardGlyph className="size-7" />
+            </button>
+            <div className="group/vol flex items-center">
+              <button onClick={() => setMuted((m) => !m)} className={controlButton} aria-label={muted ? "Unmute" : "Mute"}>
+                <VolumeGlyph level={level} className="size-7" />
+              </button>
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.02}
+                value={level}
+                onChange={(e) => {
+                  const v = Number(e.target.value);
+                  setVolume(v);
+                  setMuted(v === 0);
+                  storage.set(VOLUME_KEY, String(v));
+                }}
+                style={{ background: `linear-gradient(to right, white ${level * 100}%, rgb(255 255 255 / 0.25) ${level * 100}%)` }}
+                className="range-slim w-0 opacity-0 transition-all duration-200 group-hover/vol:ml-1 group-hover/vol:w-24 group-hover/vol:opacity-100 focus:ml-1 focus:w-24 focus:opacity-100"
+                aria-label="Volume"
+              />
+            </div>
+          </div>
+
+          <div className="flex items-center gap-1 sm:gap-2">
             {info.next && (
-              <button onClick={goNext} className={iconButton} aria-label="Next episode" title="Next episode">
-                <ForwardIcon className="size-6" />
+              <button
+                onClick={goNext}
+                className="mr-1 hidden h-10 items-center gap-2 rounded-full px-4 text-sm font-semibold text-white/85 ring-1 ring-white/20 transition hover:bg-white hover:text-black sm:flex"
+              >
+                <NextGlyph className="size-5" />
+                Next episode
+              </button>
+            )}
+            {info.next && (
+              <button onClick={goNext} className={clsx(controlButton, "sm:hidden")} aria-label="Next episode">
+                <NextGlyph className="size-7" />
               </button>
             )}
             {info.subtitles.length > 0 && (
               <TrackMenu
-                icon={<ChatBubbleBottomCenterTextIcon className="size-6" />}
+                icon={<SubtitlesGlyph className="size-7" />}
                 label="Subtitles"
                 title="Subtitles"
                 value={subtitle}
@@ -513,7 +571,7 @@ const VideoPlayer = ({ info }: Props) => {
             )}
             {audioOptions.length > 1 && (
               <TrackMenu
-                icon={<LanguageIcon className="size-6" />}
+                icon={<AudioGlyph className="size-7" />}
                 label="Audio"
                 title="Audio"
                 value={currentAudio}
@@ -522,34 +580,32 @@ const VideoPlayer = ({ info }: Props) => {
               />
             )}
             <Popover className="relative">
-              <PopoverButton className={iconButton} aria-label="Stream info">
-                <InformationCircleIcon className="size-6" />
+              <PopoverButton className={clsx(controlButton, "data-[open]:text-primary")} aria-label="Stream info">
+                <InfoGlyph className="size-7" />
               </PopoverButton>
-              <PopoverPanel
-                anchor="top end"
-                transition
-                className="z-50 mb-3 w-72 space-y-2 rounded-lg border border-white/10 bg-black/90 p-4 text-sm shadow-2xl backdrop-blur-md transition data-[closed]:opacity-0"
-              >
-                <p className="font-semibold capitalize">{mode === "direct" ? "Direct play" : mode}</p>
-                <p className="text-xs text-white/60">
-                  {compat && info.mode === "direct" ? "Compatibility mode (repackaged by the server)" : info.reason}
-                </p>
-                <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
-                  <dt className="text-white/50">File</dt>
+              <PopoverPanel anchor={{ to: "top end", gap: 12 }} transition className={clsx(glassPanel, "w-80 space-y-3 p-5 text-sm")}>
+                <div>
+                  <p className="font-semibold">{modeLabel}</p>
+                  <p className="mt-0.5 text-xs text-white/55">
+                    {compat && info.mode === "direct" ? "Compatibility mode — repackaged by the server" : info.reason}
+                  </p>
+                </div>
+                <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-xs">
+                  <dt className="text-white/45">File</dt>
                   <dd className="truncate" title={info.file.path}>
                     {info.file.path.split("/").pop()}
                   </dd>
-                  <dt className="text-white/50">Video</dt>
+                  <dt className="text-white/45">Video</dt>
                   <dd>{[info.file.resolution, info.file.video_codec?.toUpperCase()].filter(Boolean).join(" · ") || "—"}</dd>
-                  <dt className="text-white/50">Audio</dt>
+                  <dt className="text-white/45">Audio</dt>
                   <dd>{info.file.audio_codec?.toUpperCase() ?? "—"}</dd>
-                  <dt className="text-white/50">Size</dt>
+                  <dt className="text-white/45">Size</dt>
                   <dd>{formatBytes(info.file.size)}</dd>
                 </dl>
               </PopoverPanel>
             </Popover>
-            <button onClick={toggleFullscreen} className={iconButton} aria-label="Fullscreen">
-              {fullscreen ? <ArrowsPointingInIcon className="size-6" /> : <ArrowsPointingOutIcon className="size-6" />}
+            <button onClick={toggleFullscreen} className={controlButton} aria-label="Fullscreen">
+              {fullscreen ? <CollapseGlyph className="size-7" /> : <ExpandGlyph className="size-7" />}
             </button>
           </div>
         </div>
