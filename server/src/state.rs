@@ -37,3 +37,21 @@ impl Deref for AppState {
         &self.0
     }
 }
+
+impl Inner {
+    /// URL that local helpers (ffmpeg/ffprobe) use to read a torrent file.
+    pub fn internal_stream_url(&self, file_id: i64) -> String {
+        let addr = self.config.listen;
+        let host = match addr.ip() {
+            ip if ip.is_unspecified() && ip.is_ipv4() => "127.0.0.1".to_string(),
+            ip if ip.is_unspecified() => "[::1]".to_string(),
+            std::net::IpAddr::V6(ip) => format!("[{ip}]"),
+            ip => ip.to_string(),
+        };
+        format!(
+            "http://{host}:{}/api/internal/files/{file_id}/raw?key={}",
+            addr.port(),
+            self.internal_key
+        )
+    }
+}

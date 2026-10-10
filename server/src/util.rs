@@ -12,7 +12,3 @@ pub fn random_token(bytes: usize) -> String {
 pub fn sha256_hex(input: &str) -> String {
     hex::encode(Sha256::digest(input.as_bytes()))
 }
-
-pub fn now() -> chrono::DateTime<chrono::Utc> {
-    chrono::Utc::now()
-}

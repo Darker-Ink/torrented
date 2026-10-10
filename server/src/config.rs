@@ -19,9 +19,10 @@ pub struct Config {
     #[arg(long, env = "TORRENTED_DATA_DIR", default_value = "./data")]
     pub data_dir: PathBuf,
 
-    /// Directory with the built web UI (`web/dist`). Leave empty to run API only.
-    #[arg(long, env = "TORRENTED_WEB_DIR", default_value = "./web/dist")]
-    pub web_dir: PathBuf,
+    /// Serve the web UI from this directory instead of the copy embedded in
+    /// the binary. Handy while working on the frontend.
+    #[arg(long, env = "TORRENTED_WEB_DIR")]
+    pub web_dir: Option<PathBuf>,
 
     /// TMDB API key (v3). Overridden by the value saved in settings.
     #[arg(long, env = "TMDB_API_KEY")]

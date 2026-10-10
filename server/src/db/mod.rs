@@ -19,7 +19,7 @@ use std::{path::Path, str::FromStr, time::Duration};
 
 use anyhow::{Context, bail};
 use sqlx::{
-    Connection, SqliteConnection, SqlitePool,
+    Connection, Executor, SqliteConnection, SqlitePool,
     sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous},
 };
 
@@ -102,11 +102,13 @@ pub async fn migrate(
         );
     }
 
-    for m in migrations.iter().filter(|m| m.version > current) {
+    for m in migrations {
+        if m.version <= current {
+            continue;
+        }
         tracing::info!(db = label, version = m.version, name = m.name, "applying migration");
         let mut tx = conn.begin().await?;
-        sqlx::raw_sql(m.sql)
-            .execute(&mut *tx)
+        tx.execute(m.sql)
             .await
             .with_context(|| format!("{label} migration {} ({})", m.version, m.name))?;
         sqlx::query("INSERT INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)")

@@ -56,10 +56,6 @@ impl User {
             Err(AppError::forbidden("you do not have permission to do that"))
         }
     }
-
-    pub fn name(&self) -> &str {
-        self.display_name.as_deref().unwrap_or(&self.username)
-    }
 }
 
 /// Information about the caller that is useful for logging.
@@ -219,8 +215,8 @@ pub fn session_cookie(state: &AppState, token: String, max_age: Duration) -> Coo
         .build()
 }
 
-fn time_duration(d: Duration) -> axum_extra::extract::cookie::time::Duration {
-    axum_extra::extract::cookie::time::Duration::seconds(d.num_seconds())
+fn time_duration(d: Duration) -> time::Duration {
+    time::Duration::seconds(d.num_seconds())
 }
 
 pub async fn destroy_session(state: &AppState, jar: &CookieJar) -> AppResult<()> {
