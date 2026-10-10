@@ -49,7 +49,7 @@ const SeekBar = ({ current, duration, buffered, onSeek, disabled }: Props) => {
       onPointerMove={onMove}
       onPointerUp={onUp}
       onPointerLeave={() => drag === null && setHover(null)}
-      className={`group/seek relative flex h-5 items-center ${disabled || !total ? "cursor-default" : "cursor-pointer"}`}
+      className={`group/seek relative flex h-5 min-w-0 flex-1 items-center ${disabled || !total ? "cursor-default" : "cursor-pointer"}`}
       role="slider"
       aria-label="Seek"
       aria-valuemin={0}

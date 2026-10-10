@@ -577,9 +577,13 @@ async fn duration_warning(pool: &SqlitePool, file_id: i64, p: &ProbeResult) -> A
     }
     let ratio = duration / expected as f64;
     if !(0.6..=1.6).contains(&ratio) {
+        let runs = if duration < 60.0 {
+            format!("{} s", duration.round())
+        } else {
+            format!("{} min", (duration / 60.0).round())
+        };
         return Ok(Some(format!(
-            "runs {} min but is mapped to {} episode(s) totalling about {} min",
-            (duration / 60.0).round(),
+            "runs {runs} but is mapped to {} episode(s) totalling about {} min",
             runtimes.len(),
             expected / 60
         )));

@@ -374,6 +374,16 @@ const VideoPlayer = ({ info }: Props) => {
 
       <BufferingOverlay fileId={info.file_id} visible={buffering && !error} starting={!started} />
 
+      {!playing && !buffering && !error && (
+        <button
+          onClick={togglePlay}
+          aria-label="Play"
+          className="absolute top-1/2 left-1/2 z-10 grid size-20 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full bg-black/50 text-white ring-1 ring-white/20 backdrop-blur transition hover:scale-105 hover:bg-black/70"
+        >
+          <PlayIcon className="ml-1 size-10" />
+        </button>
+      )}
+
       {error && (
         <div className="absolute inset-0 z-20 grid place-items-center bg-black/70 p-6">
           <div className="max-w-md space-y-4 text-center">
