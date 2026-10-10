@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import Button from "@/features/ui/components/Button";
 import Field, { Input } from "@/features/ui/components/Field";
 import Select from "@/features/ui/components/Select";
+import Skeleton from "@/features/ui/components/Skeleton";
 import Toggle from "@/features/ui/components/Toggle";
 import { toast } from "@/features/ui/components/Toaster";
 import { useQueryClient } from "@tanstack/react-query";
@@ -100,7 +101,23 @@ const SettingsForm = () => {
     }
   };
 
-  if (!data) return null;
+  if (!data) {
+    return (
+      <div className="space-y-6">
+        {[3, 4, 5].map((n, i) => (
+          <div key={i} className="space-y-5 rounded-xl p-4 ring-1 ring-white/[0.06]">
+            <Skeleton className="h-4 w-24" />
+            {Array.from({ length: n }).map((_, j) => (
+              <div key={j} className="space-y-2">
+                <Skeleton className="h-3.5 w-40" />
+                <Skeleton className="h-10 w-full" />
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">

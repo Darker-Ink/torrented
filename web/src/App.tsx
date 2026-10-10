@@ -3,7 +3,6 @@ import { useRoutes } from "react-router-dom";
 import routes from "~react-pages";
 import AuthGate from "@/features/auth/components/AuthGate";
 import AppShell from "@/features/layout/components/AppShell";
-import Spinner from "@/features/ui/components/Spinner";
 import Toaster from "@/features/ui/components/Toaster";
 
 const App = () => {
@@ -11,13 +10,7 @@ const App = () => {
   return (
     <AuthGate>
       <AppShell>
-        <Suspense
-          fallback={
-            <div className="grid min-h-[60vh] place-items-center">
-              <Spinner />
-            </div>
-          }
-        >
+        <Suspense fallback={<div className="min-h-dvh" />}>
           {element}
         </Suspense>
       </AppShell>

@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import Button from "@/features/ui/components/Button";
 import ConfirmDialog from "@/features/ui/components/ConfirmDialog";
 import Select from "@/features/ui/components/Select";
+import { StatCardsSkeleton } from "@/features/ui/components/Skeleton";
 import { toast } from "@/features/ui/components/Toaster";
 import { api, errorMessage } from "@/lib/api";
 import { formatBytes, formatDate } from "@/lib/format";
@@ -51,6 +52,7 @@ const LibraryTransfer = () => {
 
   return (
     <div className="space-y-6">
+      {!data && <StatCardsSkeleton />}
       {data && (
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
           <StatCard label="Titles" value={data.titles} hint={`${data.movies} movies · ${data.shows} shows`} />

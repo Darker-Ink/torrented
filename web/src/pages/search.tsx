@@ -6,7 +6,7 @@ import DiscoverCard from "@/features/discover/components/DiscoverCard";
 import { useDiscoverSearch } from "@/features/discover/hooks/queries";
 import MediaGrid from "@/features/media/components/MediaGrid";
 import { useLibrary } from "@/features/media/hooks/queries";
-import Spinner from "@/features/ui/components/Spinner";
+import { PosterGridSkeleton } from "@/features/ui/components/Skeleton";
 import { can, PERM } from "@/lib/permissions";
 
 const SearchPage = () => {
@@ -52,7 +52,7 @@ const SearchPage = () => {
           <section className="space-y-4">
             <h2 className="text-xl font-bold">In your library</h2>
             {library.isLoading ? (
-              <Spinner />
+              <PosterGridSkeleton count={8} />
             ) : library.data && library.data.items.length > 0 ? (
               <MediaGrid items={library.data.items} />
             ) : (
@@ -64,7 +64,7 @@ const SearchPage = () => {
             <section className="space-y-4">
               <h2 className="text-xl font-bold">More to add</h2>
               {remote.isLoading ? (
-                <Spinner />
+                <PosterGridSkeleton count={8} />
               ) : outside.length > 0 ? (
                 <div className="grid grid-cols-2 gap-x-3 gap-y-6 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8">
                   {outside.map((item) => (

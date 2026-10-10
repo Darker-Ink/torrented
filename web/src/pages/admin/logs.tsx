@@ -6,6 +6,7 @@ import Badge from "@/features/ui/components/Badge";
 import Button from "@/features/ui/components/Button";
 import { Input } from "@/features/ui/components/Field";
 import Select from "@/features/ui/components/Select";
+import { TableSkeleton } from "@/features/ui/components/Skeleton";
 import Tabs from "@/features/ui/components/Tabs";
 import { episodeCode, formatBytes, formatDuration, timeAgo } from "@/lib/format";
 import { PERM } from "@/lib/permissions";
@@ -75,6 +76,7 @@ const AuditLog = () => {
         <Input value={text} onChange={(e) => setText(e.target.value)} placeholder="Search user, target…" className="max-w-xs" />
       </div>
       <Card padded={false}>
+        {!data && <TableSkeleton rows={8} cols={5} />}
         <div className="overflow-x-auto">
           <table className="w-full text-left text-sm">
             <thead className="text-xs text-subtle uppercase">
@@ -121,6 +123,7 @@ const StreamLog = () => {
   const { data } = useStreamLog(page);
   return (
     <Card padded={false}>
+      {!data && <TableSkeleton rows={8} cols={6} />}
       <div className="overflow-x-auto">
         <table className="w-full text-left text-sm">
           <thead className="text-xs text-subtle uppercase">

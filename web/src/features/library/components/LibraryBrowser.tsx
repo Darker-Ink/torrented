@@ -6,7 +6,7 @@ import { useGenres, useLibrary, type LibraryParams } from "@/features/media/hook
 import Button from "@/features/ui/components/Button";
 import EmptyState from "@/features/ui/components/EmptyState";
 import Select from "@/features/ui/components/Select";
-import Skeleton from "@/features/ui/components/Skeleton";
+import { PosterGridSkeleton } from "@/features/ui/components/Skeleton";
 import { can, PERM } from "@/lib/permissions";
 import type { MediaKind } from "@/lib/types";
 
@@ -64,11 +64,7 @@ const LibraryBrowser = ({ kind, title }: Props) => {
       </div>
 
       {isLoading ? (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8">
-          {Array.from({ length: 12 }).map((_, i) => (
-            <Skeleton key={i} className="aspect-[2/3]" />
-          ))}
-        </div>
+        <PosterGridSkeleton />
       ) : data && data.items.length > 0 ? (
         <>
           <MediaGrid items={data.items} />

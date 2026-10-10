@@ -13,7 +13,7 @@ import {
 } from "@/features/discover/hooks/queries";
 import { Input } from "@/features/ui/components/Field";
 import Select from "@/features/ui/components/Select";
-import Spinner from "@/features/ui/components/Spinner";
+import { PosterGridSkeleton } from "@/features/ui/components/Skeleton";
 import type { MediaKind } from "@/lib/types";
 
 const useDebounced = <T,>(value: T, ms = 350) => {
@@ -116,7 +116,7 @@ const DiscoverPage = () => {
       {debounced.trim().length > 1 ? (
         <div className="px-4 sm:px-10">
           {search.isLoading ? (
-            <Spinner />
+            <PosterGridSkeleton />
           ) : search.data && search.data.results.length > 0 ? (
             <div className="grid grid-cols-2 gap-x-3 gap-y-6 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8">
               {search.data.results.map((item) => (

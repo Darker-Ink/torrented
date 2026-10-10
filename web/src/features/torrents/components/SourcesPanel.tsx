@@ -16,6 +16,7 @@ import { useUser } from "@/features/auth/hooks/useSession";
 import Button from "@/features/ui/components/Button";
 import ConfirmDialog from "@/features/ui/components/ConfirmDialog";
 import EmptyState from "@/features/ui/components/EmptyState";
+import { CardListSkeleton } from "@/features/ui/components/Skeleton";
 import Spinner from "@/features/ui/components/Spinner";
 import { toast } from "@/features/ui/components/Toaster";
 import { errorMessage } from "@/lib/api";
@@ -221,7 +222,7 @@ const SourcesPanel = ({ mediaId, title, kind }: Props) => {
       )}
 
       {isLoading ? (
-        <Spinner />
+        <CardListSkeleton count={2} />
       ) : empty ? (
         <EmptyState
           icon={ServerStackIcon}

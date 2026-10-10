@@ -134,9 +134,17 @@ const EpisodeRow = ({ ep, media, fallbackImage }: { ep: Episode; media: MediaRef
 const EpisodeList = ({ media, episodes, loading, fallbackImage }: Props) => {
   if (loading || !episodes) {
     return (
-      <div className="space-y-3">
-        {[0, 1, 2].map((i) => (
-          <Skeleton key={i} className="h-24" />
+      <div className="divide-y divide-line/60">
+        {[0, 1, 2, 3].map((i) => (
+          <div key={i} className="flex items-center gap-4 p-3">
+            <Skeleton className="hidden h-6 w-8 sm:block" />
+            <Skeleton className="aspect-video w-36 shrink-0 sm:w-44" />
+            <div className="flex-1 space-y-2">
+              <Skeleton className="h-4 w-1/3" />
+              <Skeleton className="h-3 w-1/5" />
+              <Skeleton className="h-3 w-3/4" />
+            </div>
+          </div>
         ))}
       </div>
     );

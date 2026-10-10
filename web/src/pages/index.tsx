@@ -8,22 +8,31 @@ import MediaRow from "@/features/media/components/MediaRow";
 import { useHome } from "@/features/media/hooks/queries";
 import Button from "@/features/ui/components/Button";
 import EmptyState from "@/features/ui/components/EmptyState";
-import Skeleton from "@/features/ui/components/Skeleton";
+import Skeleton, { RowSkeleton, SkeletonText } from "@/features/ui/components/Skeleton";
 import { can, PERM } from "@/lib/permissions";
 
 const HomeSkeleton = () => (
-  <div className="space-y-10">
-    <Skeleton className="h-[70vh] w-full rounded-none" />
-    {[0, 1].map((i) => (
-      <div key={i} className="space-y-3 px-4 sm:px-10">
-        <Skeleton className="h-6 w-48" />
-        <div className="flex gap-3 overflow-hidden">
-          {[0, 1, 2, 3, 4].map((j) => (
-            <Skeleton key={j} className="aspect-video w-72 shrink-0" />
-          ))}
+  <div className="pb-8">
+    <section className="relative h-[78vh] min-h-[520px] bg-gradient-to-br from-white/[0.04] via-transparent to-transparent">
+      <div className="flex h-full max-w-2xl flex-col justify-end gap-5 px-4 pb-[14vh] sm:px-10">
+        <Skeleton className="h-24 w-3/4 sm:h-32" />
+        <div className="flex gap-3">
+          <Skeleton className="h-4 w-20" />
+          <Skeleton className="h-4 w-12" />
+          <Skeleton className="h-4 w-28" />
+        </div>
+        <SkeletonText lines={3} className="max-w-xl" />
+        <div className="flex gap-3">
+          <Skeleton className="h-12 w-32" />
+          <Skeleton className="h-12 w-40" />
         </div>
       </div>
-    ))}
+    </section>
+    <div className="relative z-10 -mt-[10vh] space-y-8">
+      <RowSkeleton titleWidth="w-52" />
+      <RowSkeleton titleWidth="w-40" />
+      <RowSkeleton titleWidth="w-32" />
+    </div>
   </div>
 );
 

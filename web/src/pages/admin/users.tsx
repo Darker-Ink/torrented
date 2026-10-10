@@ -9,6 +9,7 @@ import { useUser } from "@/features/auth/hooks/useSession";
 import Avatar from "@/features/layout/components/Avatar";
 import Badge from "@/features/ui/components/Badge";
 import Button from "@/features/ui/components/Button";
+import { TableSkeleton } from "@/features/ui/components/Skeleton";
 import ConfirmDialog from "@/features/ui/components/ConfirmDialog";
 import { toast } from "@/features/ui/components/Toaster";
 import { errorMessage } from "@/lib/api";
@@ -47,6 +48,7 @@ const UsersPage = () => {
       }
     >
       <Card padded={false}>
+        {!data && <TableSkeleton rows={4} cols={5} />}
         <div className="overflow-x-auto">
           <table className="w-full text-left text-sm">
             <thead className="text-xs text-subtle uppercase">

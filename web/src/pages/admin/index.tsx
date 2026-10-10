@@ -4,7 +4,7 @@ import Card from "@/features/admin/components/Card";
 import StatCard from "@/features/admin/components/StatCard";
 import { useOverview } from "@/features/admin/hooks/queries";
 import Badge from "@/features/ui/components/Badge";
-import Spinner from "@/features/ui/components/Spinner";
+import Skeleton, { StatCardsSkeleton } from "@/features/ui/components/Skeleton";
 import { episodeCode, formatBytes, formatDuration, timeAgo } from "@/lib/format";
 
 const OverviewPage = () => {
@@ -13,7 +13,14 @@ const OverviewPage = () => {
   return (
     <AdminLayout title="Overview" description="What's happening on this server right now.">
       {!data ? (
-        <Spinner />
+        <div className="space-y-6">
+          <StatCardsSkeleton />
+          <Skeleton className="h-28 w-full rounded-xl" />
+          <div className="grid gap-6 xl:grid-cols-2">
+            <Skeleton className="h-56 rounded-xl" />
+            <Skeleton className="h-56 rounded-xl" />
+          </div>
+        </div>
       ) : (
         <div className="space-y-6">
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">

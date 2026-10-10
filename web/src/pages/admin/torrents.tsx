@@ -4,6 +4,7 @@ import Card from "@/features/admin/components/Card";
 import { useAllTorrents, useJobs } from "@/features/admin/hooks/queries";
 import Badge from "@/features/ui/components/Badge";
 import Button from "@/features/ui/components/Button";
+import { TableSkeleton } from "@/features/ui/components/Skeleton";
 import Spinner from "@/features/ui/components/Spinner";
 import { useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
@@ -51,9 +52,7 @@ const TorrentsPage = () => {
 
       <Card padded={false}>
         {!torrents ? (
-          <div className="p-6">
-            <Spinner />
-          </div>
+          <TableSkeleton rows={5} />
         ) : torrents.length === 0 ? (
           <p className="px-4 py-8 text-center text-sm text-muted">No torrents yet. Add one from any title's page.</p>
         ) : (

@@ -7,7 +7,7 @@ import { useRequests } from "@/features/requests/hooks/queries";
 import Button from "@/features/ui/components/Button";
 import EmptyState from "@/features/ui/components/EmptyState";
 import Select from "@/features/ui/components/Select";
-import Spinner from "@/features/ui/components/Spinner";
+import { CardListSkeleton } from "@/features/ui/components/Skeleton";
 import Tabs from "@/features/ui/components/Tabs";
 import { can, PERM } from "@/lib/permissions";
 import type { RequestStatus } from "@/lib/types";
@@ -30,7 +30,7 @@ const RequestList = ({ scope }: { scope: "mine" | "all" }) => {
         ]}
       />
       {isLoading ? (
-        <Spinner />
+        <CardListSkeleton count={4} media columns={2} />
       ) : data && data.length > 0 ? (
         <div className="grid gap-3 lg:grid-cols-2">
           {data.map((r) => (
