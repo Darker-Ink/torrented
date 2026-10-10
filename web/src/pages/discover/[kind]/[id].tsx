@@ -5,7 +5,8 @@ import { useNavigate, useParams } from "react-router-dom";
 import { useUser } from "@/features/auth/hooks/useSession";
 import RequestDialog from "@/features/discover/components/RequestDialog";
 import { useAddToLibrary, useDiscoverTitle } from "@/features/discover/hooks/queries";
-import CastRow from "@/features/media/components/CastRow";
+import SectionTabs from "@/features/media/components/SectionTabs";
+import TitleDetails from "@/features/media/components/TitleDetails";
 import TitleHeader from "@/features/media/components/TitleHeader";
 import TrailerDialog from "@/features/media/components/TrailerDialog";
 import Badge from "@/features/ui/components/Badge";
@@ -15,6 +16,7 @@ import Spinner from "@/features/ui/components/Spinner";
 import { toast } from "@/features/ui/components/Toaster";
 import { errorMessage } from "@/lib/api";
 import { formatRuntime } from "@/lib/format";
+import { img } from "@/lib/images";
 import { can, PERM } from "@/lib/permissions";
 import type { MediaKind } from "@/lib/types";
 
@@ -59,7 +61,7 @@ const DiscoverTitlePage = () => {
   const seasons = data.seasons.filter((s) => s.season_number > 0).length;
 
   return (
-    <div className="pb-10">
+    <div className="space-y-6 pb-12">
       <TitleHeader
         title={data.title}
         backdrop={data.backdrop_path}
@@ -101,24 +103,55 @@ const DiscoverTitlePage = () => {
         )}
       </TitleHeader>
 
-      <div className="space-y-10">
-        <CastRow cast={data.cast} />
-        {kind === "tv" && data.seasons.length > 0 && (
-          <section className="space-y-3 px-4 sm:px-10">
-            <h2 className="text-xl font-bold">Seasons</h2>
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {data.seasons.map((s) => (
-                <div key={s.season_number} className="rounded-lg border border-line bg-white/[0.03] p-4">
-                  <p className="font-semibold">{s.name ?? `Season ${s.season_number}`}</p>
-                  <p className="text-xs text-muted">
-                    {s.episode_count} episodes{s.air_date ? ` · ${s.air_date.slice(0, 4)}` : ""}
-                  </p>
-                </div>
-              ))}
-            </div>
-          </section>
-        )}
-      </div>
+      <SectionTabs
+        sections={[
+          {
+            key: "details",
+            label: "Details",
+            content: (
+              <TitleDetails
+                kind={kind}
+                tmdbId={data.tmdb_id}
+                releaseDate={data.release_date}
+                runtime={data.runtime}
+                status={data.status}
+                rating={data.rating}
+                certification={data.certification}
+                networks={data.networks}
+                genres={data.genres}
+                cast={data.cast}
+                seasons={seasons}
+              />
+            ),
+          },
+          ...(kind === "tv" && data.seasons.length > 0
+            ? [
+                {
+                  key: "seasons",
+                  label: "Seasons",
+                  count: seasons,
+                  content: (
+                    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                      {data.seasons.map((s) => (
+                        <div key={s.season_number} className="flex gap-4 rounded-2xl bg-white/[0.025] p-3 ring-1 ring-white/[0.07]">
+                          <div className="aspect-[2/3] w-16 shrink-0 overflow-hidden rounded-lg bg-surface">
+                            {s.poster_path && <img src={img(s.poster_path, "w185")} alt="" className="size-full object-cover" />}
+                          </div>
+                          <div className="min-w-0 py-1">
+                            <p className="truncate font-semibold">{s.name ?? `Season ${s.season_number}`}</p>
+                            <p className="text-sm text-muted">
+                              {s.episode_count} episodes{s.air_date ? ` · ${s.air_date.slice(0, 4)}` : ""}
+                            </p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ),
+                },
+              ]
+            : []),
+        ]}
+      />
 
       <RequestDialog open={requesting} onClose={() => setRequesting(false)} title={data} />
       {data.trailer_key && (

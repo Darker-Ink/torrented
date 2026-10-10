@@ -13,8 +13,9 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useUser } from "@/features/auth/hooks/useSession";
-import CastRow from "@/features/media/components/CastRow";
 import EpisodeList from "@/features/media/components/EpisodeList";
+import SectionTabs, { type Section } from "@/features/media/components/SectionTabs";
+import TitleDetails from "@/features/media/components/TitleDetails";
 import TitleHeader from "@/features/media/components/TitleHeader";
 import TrailerDialog from "@/features/media/components/TrailerDialog";
 import { useEpisodes, useTitle, useToggleWatchlist } from "@/features/media/hooks/queries";
@@ -134,8 +135,98 @@ const TitlePage = () => {
   const canAddTorrent = can(user, PERM.ADD_TORRENTS);
   const showSources = canAddTorrent || can(user, PERM.MANAGE_TORRENTS);
 
+  const sections: Section[] = [];
+  if (isTv && seasons.length > 0) {
+    const current = seasons.find((s) => s.season_number === season);
+    sections.push({
+      key: "episodes",
+      label: "Episodes",
+      content: (
+        <div className="space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="text-sm text-muted">
+              {current?.available_episodes ?? 0} of {current?.episode_count ?? 0} episodes available
+            </p>
+            <Select
+              className="w-56"
+              value={season}
+              onChange={setSeason}
+              options={seasons.map((s) => ({
+                value: s.season_number as number | null,
+                label: s.name ?? `Season ${s.season_number}`,
+                description: `${s.available_episodes}/${s.episode_count} available`,
+              }))}
+              anchor="bottom end"
+            />
+          </div>
+          <EpisodeList mediaId={id} episodes={episodes.data} loading={episodes.isLoading} fallbackImage={media.backdrop_path} />
+        </div>
+      ),
+    });
+  }
+  if (!isTv && data.files.length > 1) {
+    sections.push({
+      key: "versions",
+      label: "Versions",
+      count: data.files.length,
+      content: (
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {data.files.map((f) => (
+            <button
+              key={f.file_id}
+              onClick={() => navigate(`/watch/${f.file_id}`)}
+              className="group flex items-center gap-4 rounded-2xl bg-white/[0.025] p-4 text-left ring-1 ring-white/[0.07] transition hover:bg-white/[0.05] hover:ring-primary/40"
+            >
+              <span className="grid size-11 shrink-0 place-items-center rounded-full bg-white/10 transition group-hover:bg-white group-hover:text-black">
+                <PlayIcon className="ml-0.5 size-5" />
+              </span>
+              <span className="min-w-0">
+                <span className="block truncate font-semibold">
+                  {[f.resolution, f.source, f.video_codec, f.hdr].filter(Boolean).join(" · ") || "Video"}
+                </span>
+                <span className="block truncate text-xs text-muted">
+                  {formatBytes(f.size)} · {f.torrent_name}
+                </span>
+              </span>
+            </button>
+          ))}
+        </div>
+      ),
+    });
+  }
+  sections.push({
+    key: "details",
+    label: "Details",
+    content: (
+      <TitleDetails
+        kind={media.kind}
+        tmdbId={media.tmdb_id}
+        imdbId={media.imdb_id}
+        releaseDate={media.release_date}
+        runtime={media.runtime}
+        status={media.status}
+        rating={media.rating}
+        voteCount={media.vote_count}
+        certification={media.certification}
+        language={media.original_language}
+        networks={media.networks}
+        genres={media.genres}
+        cast={media.cast_members}
+        seasons={seasonCount}
+      />
+    ),
+  });
+  if (showSources) {
+    sections.push({
+      key: "sources",
+      label: "Sources",
+      count: data.torrent_count,
+      content: <SourcesPanel mediaId={id} title={media.title} kind={media.kind} />,
+    });
+  }
+
   return (
-    <div className="space-y-10 pb-10">
+    <div className="space-y-6 pb-12">
       <TitleHeader
         title={media.title}
         backdrop={media.backdrop_path}
@@ -212,59 +303,7 @@ const TitlePage = () => {
         )}
       </TitleHeader>
 
-      {isTv && seasons.length > 0 && (
-        <section className="space-y-4 px-4 sm:px-10">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <h2 className="text-xl font-bold">Episodes</h2>
-            <Select
-              className="w-56"
-              value={season}
-              onChange={setSeason}
-              options={seasons.map((s) => ({
-                value: s.season_number as number | null,
-                label: s.name ?? `Season ${s.season_number}`,
-                description: `${s.available_episodes}/${s.episode_count} available`,
-              }))}
-              anchor="bottom end"
-            />
-          </div>
-          <EpisodeList
-            mediaId={id}
-            episodes={episodes.data}
-            loading={episodes.isLoading}
-            fallbackImage={media.backdrop_path}
-          />
-        </section>
-      )}
-
-      {!isTv && data.files.length > 1 && (
-        <section className="space-y-3 px-4 sm:px-10">
-          <h2 className="text-xl font-bold">Versions</h2>
-          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-            {data.files.map((f) => (
-              <button
-                key={f.file_id}
-                onClick={() => navigate(`/watch/${f.file_id}`)}
-                className="flex items-center gap-3 rounded-lg border border-line bg-white/[0.03] p-3 text-left transition hover:border-primary/40 hover:bg-white/[0.05]"
-              >
-                <PlayIcon className="size-5 shrink-0 text-primary" />
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-semibold">
-                    {[f.resolution, f.source, f.video_codec, f.hdr].filter(Boolean).join(" · ") || "Video"}
-                  </p>
-                  <p className="truncate text-xs text-muted">
-                    {formatBytes(f.size)} · {f.torrent_name}
-                  </p>
-                </div>
-              </button>
-            ))}
-          </div>
-        </section>
-      )}
-
-      <CastRow cast={media.cast_members} />
-
-      {showSources && <SourcesPanel mediaId={id} title={media.title} kind={media.kind} />}
+      <SectionTabs sections={sections} />
 
       {media.trailer_key && (
         <TrailerDialog open={trailer} onClose={() => setTrailer(false)} youtubeKey={media.trailer_key} title={media.title} />
