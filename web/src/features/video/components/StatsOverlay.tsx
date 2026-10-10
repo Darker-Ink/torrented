@@ -38,8 +38,12 @@ const StatsOverlay = ({ info, mode, video, bufferAhead, position, onClose }: Pro
     ["Speed", v ? `${v.playbackRate}×` : ""],
     ["Volume", v ? `${Math.round(v.volume * 100)}%${v.muted ? " (muted)" : ""}` : ""],
     ["Position", formatClock(position)],
-    ["Swarm", p ? `${p.peers} peers · ${p.download_mbps.toFixed(2)} MiB/s` : "not loaded"],
-    ["Fetched", p ? `${formatBytes(p.downloaded)} of ${formatBytes(p.size)}` : ""],
+    ...((info.source === "seedbox"
+      ? [["Streaming from", "TorBox (seedbox)"]]
+      : [
+          ["Swarm", p ? `${p.peers} peers · ${p.download_mbps.toFixed(2)} MiB/s` : "not loaded"],
+          ["Fetched", p ? `${formatBytes(p.downloaded)} of ${formatBytes(p.size)}` : ""],
+        ]) as [string, string][]),
     ["Session", String(info.session_id)],
   ];
 

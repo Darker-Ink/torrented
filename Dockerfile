@@ -27,7 +27,8 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     && cp target/release/torrented /usr/local/bin/torrented
 
 FROM alpine:3.22
-RUN apk add --no-cache ffmpeg ca-certificates tzdata \
+# iproute2, wg and wireguard-go are only used for the built-in WireGuard VPN.
+RUN apk add --no-cache ffmpeg ca-certificates tzdata iproute2-minimal wireguard-tools-wg wireguard-go \
     && addgroup -S -g 1000 torrented \
     && adduser -S -D -H -u 1000 -G torrented torrented \
     && mkdir /data \

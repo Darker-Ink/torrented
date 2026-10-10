@@ -7,6 +7,8 @@ use std::{collections::BTreeMap, net::SocketAddr, time::Duration};
 use serde::Serialize;
 use tokio::net::UdpSocket;
 
+use super::engine::NetConfig;
+
 const TIMEOUT: Duration = Duration::from_secs(8);
 const MAX_TRACKERS: usize = 12;
 
@@ -18,6 +20,16 @@ pub struct SwarmStats {
     /// How many trackers answered.
     pub trackers_answered: usize,
     pub trackers_tried: usize,
+    /// Why trackers weren't asked at all.
+    pub skipped: Option<String>,
+}
+
+/// How scrapes leave the machine: the same way torrent traffic does.
+#[derive(Clone)]
+struct Route {
+    http: reqwest::Client,
+    /// None: UDP isn't allowed. Some(None): any interface.
+    udp: Option<Option<String>>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -29,11 +41,33 @@ struct Scrape {
 
 /// Scrape up to a dozen trackers at once and keep the best answer. Trackers
 /// rarely agree, and the biggest number is the closest to the real swarm.
-pub async fn scrape(trackers: &[String], info_hash: &str) -> Option<SwarmStats> {
+pub async fn scrape(trackers: &[String], info_hash: &str, net: &NetConfig) -> Option<SwarmStats> {
     let hash: [u8; 20] = hex::decode(info_hash).ok()?.try_into().ok()?;
+    let skipped = |reason: &str| {
+        Some(SwarmStats {
+            seeders: 0,
+            leechers: 0,
+            completed: None,
+            trackers_answered: 0,
+            trackers_tried: 0,
+            skipped: Some(reason.to_string()),
+        })
+    };
+    let Some(http) = crate::network::http_client(net, TIMEOUT) else {
+        return skipped("torrent traffic is switched off");
+    };
+    let route = Route {
+        http,
+        udp: match net {
+            NetConfig::Direct => Some(None),
+            NetConfig::Interface { name } => Some(Some(name.clone())),
+            NetConfig::Socks5 { .. } | NetConfig::Off { .. } => None,
+        },
+    };
     let mut list: Vec<String> = Vec::new();
     for t in trackers {
-        if !list.contains(t) && (t.starts_with("http") || t.starts_with("udp://")) {
+        let usable = t.starts_with("http") || (t.starts_with("udp://") && route.udp.is_some());
+        if !list.contains(t) && usable {
             list.push(t.clone());
         }
     }
@@ -44,8 +78,9 @@ pub async fn scrape(trackers: &[String], info_hash: &str) -> Option<SwarmStats> 
     }
 
     let tasks = list.into_iter().map(|t| {
+        let route = route.clone();
         tokio::spawn(async move {
-            match tokio::time::timeout(TIMEOUT, scrape_one(&t, &hash)).await {
+            match tokio::time::timeout(TIMEOUT, scrape_one(&t, &hash, &route)).await {
                 Ok(Ok(s)) => Some(s),
                 Ok(Err(e)) => {
                     tracing::debug!(tracker = %t, error = %e, "scrape failed");
@@ -68,6 +103,7 @@ pub async fn scrape(trackers: &[String], info_hash: &str) -> Option<SwarmStats> 
             completed: None,
             trackers_answered: 0,
             trackers_tried: tried,
+            skipped: None,
         });
     }
     Some(SwarmStats {
@@ -76,14 +112,18 @@ pub async fn scrape(trackers: &[String], info_hash: &str) -> Option<SwarmStats> 
         completed: results.iter().filter_map(|r| r.completed).max(),
         trackers_answered: results.len(),
         trackers_tried: tried,
+        skipped: None,
     })
 }
 
-async fn scrape_one(tracker: &str, hash: &[u8; 20]) -> anyhow::Result<Scrape> {
+async fn scrape_one(tracker: &str, hash: &[u8; 20], route: &Route) -> anyhow::Result<Scrape> {
     if tracker.starts_with("udp://") {
-        udp_scrape(tracker, hash).await
+        match &route.udp {
+            Some(iface) => udp_scrape(tracker, hash, iface.as_deref()).await,
+            None => anyhow::bail!("UDP isn't allowed on this route"),
+        }
     } else {
-        http_scrape(tracker, hash).await
+        http_scrape(tracker, hash, &route.http).await
     }
 }
 
@@ -107,13 +147,11 @@ fn scrape_url(announce: &str) -> Option<String> {
     Some(url)
 }
 
-async fn http_scrape(tracker: &str, hash: &[u8; 20]) -> anyhow::Result<Scrape> {
+async fn http_scrape(tracker: &str, hash: &[u8; 20], http: &reqwest::Client) -> anyhow::Result<Scrape> {
     let url = scrape_url(tracker).ok_or_else(|| anyhow::anyhow!("tracker doesn't support scrape"))?;
     let sep = if url.contains('?') { '&' } else { '?' };
     let encoded: String = hash.iter().map(|b| format!("%{b:02X}")).collect();
-    let body = reqwest::Client::builder()
-        .timeout(TIMEOUT)
-        .build()?
+    let body = http
         .get(format!("{url}{sep}info_hash={encoded}"))
         .send()
         .await?
@@ -137,7 +175,7 @@ async fn http_scrape(tracker: &str, hash: &[u8; 20]) -> anyhow::Result<Scrape> {
     })
 }
 
-async fn udp_scrape(tracker: &str, hash: &[u8; 20]) -> anyhow::Result<Scrape> {
+async fn udp_scrape(tracker: &str, hash: &[u8; 20], iface: Option<&str>) -> anyhow::Result<Scrape> {
     let url = url::Url::parse(tracker)?;
     let host = url.host_str().ok_or_else(|| anyhow::anyhow!("no host"))?;
     let port = url.port().ok_or_else(|| anyhow::anyhow!("no port"))?;
@@ -151,6 +189,11 @@ async fn udp_scrape(tracker: &str, hash: &[u8; 20]) -> anyhow::Result<Scrape> {
         .ok_or_else(|| anyhow::anyhow!("could not resolve tracker"))?;
     let bind: SocketAddr = if addr.is_ipv4() { "0.0.0.0:0" } else { "[::]:0" }.parse()?;
     let socket = UdpSocket::bind(bind).await?;
+    if let Some(name) = iface
+        && !crate::network::bind_udp_to_interface(&socket, name)
+    {
+        anyhow::bail!("couldn't bind to {name}");
+    }
     socket.connect(addr).await?;
 
     let tx: u32 = rand::random();

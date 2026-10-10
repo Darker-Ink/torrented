@@ -2,6 +2,7 @@ import { Link } from "react-router-dom";
 import AdminLayout from "@/features/admin/components/AdminLayout";
 import Card from "@/features/admin/components/Card";
 import { useAllTorrents, useJobs } from "@/features/admin/hooks/queries";
+import SeedboxBadge from "@/features/torrents/components/SeedboxBadge";
 import Badge from "@/features/ui/components/Badge";
 import Button from "@/features/ui/components/Button";
 import { TableSkeleton } from "@/features/ui/components/Skeleton";
@@ -80,6 +81,7 @@ const TorrentsPage = () => {
                 </div>
                 <div className="flex shrink-0 gap-1">
                   {t.resolution && <Badge tone="primary">{t.resolution}</Badge>}
+                  <SeedboxBadge state={t.seedbox} />
                   {t.job && t.job.warnings.length > 0 && <Badge tone="warning">{t.job.warnings.length} warnings</Badge>}
                 </div>
               </li>

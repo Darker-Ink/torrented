@@ -1,17 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, qs } from "@/lib/api";
-import type {
-  Invite,
-  LibraryInfo,
-  LogEntry,
-  Overview,
-  Paged,
-  PermissionInfo,
-  SettingsResponse,
-  StreamEntry,
-  TorrentJob,
-  User,
-} from "@/lib/types";
+import type { Invite, LibraryInfo, LogEntry, NetworkStatus, Overview, Paged, PermissionInfo, SeedboxState, SettingsResponse, StreamEntry, TorrentJob, User } from "@/lib/types";
 
 export const useOverview = () =>
   useQuery({ queryKey: ["admin", "overview"], queryFn: () => api.get<Overview>("/admin/overview"), refetchInterval: 5000 });
@@ -38,6 +27,9 @@ export const useStreamLog = (page: number) =>
     placeholderData: (p) => p,
   });
 
+export const useNetwork = () =>
+  useQuery({ queryKey: ["admin", "network"], queryFn: () => api.get<NetworkStatus>("/admin/network") });
+
 export const useSettings = () =>
   useQuery({ queryKey: ["admin", "settings"], queryFn: () => api.get<SettingsResponse>("/settings") });
 
@@ -58,6 +50,7 @@ export type AdminTorrent = {
   media_tmdb_id: number;
   poster_path: string | null;
   job: TorrentJob | null;
+  seedbox?: SeedboxState | null;
 };
 
 export const useAllTorrents = () =>

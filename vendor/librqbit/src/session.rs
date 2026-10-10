@@ -120,6 +120,9 @@ pub struct Session {
     reqwest_client: reqwest::Client,
     udp_tracker_client: UdpTrackerClient,
     disable_trackers: bool,
+    /// Set when peers are reached through a SOCKS5 proxy. UDP can't go
+    /// through it, so UDP trackers are skipped rather than contacted directly.
+    http_trackers_only: bool,
 
     // Lifecycle management
     cancellation_token: CancellationToken,
@@ -691,6 +694,7 @@ impl Session {
                 .context("error initializing session persistence store")?;
 
             let proxy_url = opts.connect.as_ref().and_then(|s| s.proxy_url.as_ref());
+            let proxy_config_set = proxy_url.is_some();
             let proxy_config = match proxy_url {
                 Some(pu) => Some(
                     SocksProxyConfig::parse(pu)
@@ -804,6 +808,7 @@ impl Session {
                 ipv4_only: opts.ipv4_only,
                 trackers: opts.trackers,
                 disable_trackers: opts.disable_trackers,
+                http_trackers_only: proxy_config_set,
                 peer_limit: opts.peer_limit,
                 client_name_and_version,
 
@@ -1553,6 +1558,9 @@ impl Session {
         if self.disable_trackers {
             trackers.clear();
         }
+        if self.http_trackers_only {
+            trackers.retain(|t| matches!(t.scheme(), "http" | "https"));
+        }
 
         if is_private && trackers.len() > 1 {
             warn!(
@@ -1562,6 +1570,9 @@ impl Session {
             trackers.truncate(1);
         } else if !self.disable_trackers {
             trackers.extend(self.trackers.iter().cloned());
+        }
+        if self.http_trackers_only {
+            trackers.retain(|t| matches!(t.scheme(), "http" | "https"));
         }
 
         let tracker_rx_stats = PeerRxTorrentInfo {

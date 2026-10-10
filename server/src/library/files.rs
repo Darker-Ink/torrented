@@ -76,6 +76,8 @@ pub struct FileContext {
     pub torrent_id: i64,
     pub info_hash: String,
     #[serde(skip)]
+    pub magnet: String,
+    #[serde(skip)]
     pub metainfo: Option<Vec<u8>>,
     pub media_id: i64,
     pub media_kind: String,
@@ -87,7 +89,7 @@ pub async fn file_context(pool: &SqlitePool, file_id: i64) -> AppResult<Option<F
     Ok(sqlx::query_as(
         "SELECT f.id AS file_id, f.file_index, f.path, f.size, f.kind, f.container, f.duration,
                 f.video_codec, f.audio_codec, f.resolution, f.season_number, f.episode_numbers, f.probe,
-                t.id AS torrent_id, t.info_hash, t.metainfo,
+                t.id AS torrent_id, t.info_hash, t.magnet, t.metainfo,
                 m.id AS media_id, m.kind AS media_kind, m.tmdb_id, m.title
          FROM torrent_files f
          JOIN torrents t ON t.id = f.torrent_id

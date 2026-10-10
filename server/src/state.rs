@@ -17,6 +17,7 @@ pub struct Inner {
     pub settings: Settings,
     pub metadata: Metadata,
     pub engine: Arc<TorrentEngine>,
+    pub seedbox: crate::seedbox::Seedbox,
     pub tools: MediaTools,
     /// Random key that lets local helper processes (ffmpeg/ffprobe) read the
     /// raw stream endpoint without a user session.

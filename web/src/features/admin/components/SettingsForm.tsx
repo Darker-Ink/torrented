@@ -12,6 +12,8 @@ import { useSettings } from "../hooks/queries";
 import Card from "./Card";
 import PermissionEditor from "./PermissionEditor";
 
+export const NETWORK_GROUPS = ["VPN", "Seedbox"];
+
 const SettingControl = ({ def, value, onChange }: { def: SettingDef; value: string; onChange: (v: string) => void }) => {
   if (def.key === "default_permissions") {
     return (
@@ -61,9 +63,12 @@ const SettingsForm = () => {
 
   const groups = useMemo(() => {
     const out: Record<string, SettingDef[]> = {};
-    data?.definitions.forEach((d) => {
-      (out[d.group] ??= []).push(d);
-    });
+    // VPN and seedbox settings live on their own page.
+    data?.definitions
+      .filter((d) => !NETWORK_GROUPS.includes(d.group))
+      .forEach((d) => {
+        (out[d.group] ??= []).push(d);
+      });
     return out;
   }, [data]);
 

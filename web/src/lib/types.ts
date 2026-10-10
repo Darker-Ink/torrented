@@ -316,7 +316,7 @@ export type TorrentJob = {
 };
 
 export type Sources = {
-  torrents: { torrent: Torrent; files: TorrentFile[]; job: TorrentJob | null }[];
+  torrents: { torrent: Torrent; files: TorrentFile[]; job: TorrentJob | null; seedbox?: SeedboxState | null }[];
   pending: TorrentJob[];
 };
 
@@ -352,6 +352,8 @@ export type PlayInfo = {
   session_id: number;
   mode: "direct" | "remux" | "transcode";
   reason: string;
+  /** Where the bytes come from. */
+  source?: "swarm" | "seedbox";
   url: string;
   seekable: boolean;
   duration: number | null;
@@ -479,6 +481,26 @@ export type SettingDef = {
   options?: string[];
   group: string;
 };
+
+export type NetStatus = {
+  state: "running" | "off";
+  route: string;
+  error: string | null;
+  listen_port: number | null;
+};
+
+export type NetworkStatus = {
+  torrents: NetStatus;
+  vpn_mode: string;
+  wireguard_supported: boolean;
+  seedbox: { provider: "torbox"; mode: "prefer" | "only"; add_on_import: boolean } | null;
+};
+
+export type SeedboxState =
+  | { state: "missing" }
+  | { state: "ready" }
+  | { state: "downloading"; progress: number; detail: string }
+  | { state: "error"; error: string };
 
 export type SettingsResponse = {
   definitions: SettingDef[];

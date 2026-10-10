@@ -165,6 +165,28 @@ async fn serve_file(
     session_id: Option<i64>,
     readahead: u64,
 ) -> AppResult<Response> {
+    match crate::seedbox::locate(
+        state,
+        &ctx.info_hash,
+        Some(&ctx.magnet),
+        ctx.metainfo.as_deref(),
+        &ctx.path,
+        ctx.size as u64,
+    )
+    .await
+    {
+        crate::seedbox::FileSource::Swarm => {}
+        crate::seedbox::FileSource::Remote(url) => {
+            return serve_remote(state, ctx, &url, headers, session_id).await;
+        }
+        crate::seedbox::FileSource::Pending(msg) => {
+            return Err(AppError::Unavailable(msg));
+        }
+    }
+    if !state.engine.is_running() {
+        let why = state.engine.status().error.unwrap_or_else(|| "not started".into());
+        return Err(AppError::Unavailable(format!("torrent network is off: {why}")));
+    }
     let metainfo = ctx
         .metainfo
         .clone()
@@ -192,6 +214,70 @@ async fn serve_file(
         Some(Box::new(guard)),
     )
     .await)
+}
+
+/// Relay a byte range of a file from the seedbox.
+async fn serve_remote(
+    state: &AppState,
+    ctx: &FileContext,
+    url: &str,
+    headers: &HeaderMap,
+    session_id: Option<i64>,
+) -> AppResult<Response> {
+    let len = ctx.size as u64;
+    let range = match streaming::parse_range(headers, len) {
+        Ok(r) => r,
+        Err(()) => {
+            return Ok((
+                StatusCode::RANGE_NOT_SATISFIABLE,
+                [(header::CONTENT_RANGE, format!("bytes */{len}"))],
+            )
+                .into_response());
+        }
+    };
+    let (status, start, end) = match range {
+        Some(r) => (StatusCode::PARTIAL_CONTENT, r.start, r.end),
+        None => (StatusCode::OK, 0, len.saturating_sub(1)),
+    };
+    let upstream = state
+        .seedbox
+        .stream_client()
+        .get(url)
+        .header(header::RANGE, format!("bytes={start}-{end}"))
+        .send()
+        .await
+        .map_err(|e| AppError::Upstream(format!("seedbox: {e}")))?;
+    let code = upstream.status();
+    if !(code == reqwest::StatusCode::PARTIAL_CONTENT || (code.is_success() && start == 0)) {
+        state.seedbox.drop_link(url);
+        return Err(AppError::Upstream(format!("seedbox answered HTTP {code}")));
+    }
+    let counter = Arc::new(AtomicU64::new(0));
+    let guard = StreamGuard {
+        state: state.clone(),
+        session_id,
+        counter: counter.clone(),
+        _lease: None,
+        _child: None,
+    };
+    let body_len = if len == 0 { 0 } else { end - start + 1 };
+    let stream = Box::pin(futures::StreamExt::map(upstream.bytes_stream(), |r| {
+        r.map_err(std::io::Error::other)
+    }));
+    let body = Body::from_stream(CountingStream::new(stream, counter, Some(Box::new(guard))));
+    let mime = streaming::mime_for(&ctx.path);
+    let mut res = Response::builder()
+        .status(status)
+        .header(header::CONTENT_TYPE, mime)
+        .header(header::ACCEPT_RANGES, "bytes")
+        .header(header::CONTENT_LENGTH, body_len)
+        .header(header::CACHE_CONTROL, "no-store");
+    if status == StatusCode::PARTIAL_CONTENT {
+        res = res.header(header::CONTENT_RANGE, format!("bytes {start}-{end}/{len}"));
+    }
+    Ok(res
+        .body(body)
+        .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response()))
 }
 
 #[derive(Deserialize)]
@@ -576,6 +662,21 @@ async fn play(
     if ctx.kind != "video" {
         return Err(AppError::bad_request("not a video file"));
     }
+    // With a seedbox, this also hands it the torrent if it doesn't have it.
+    let source = match crate::seedbox::locate(
+        &state,
+        &ctx.info_hash,
+        Some(&ctx.magnet),
+        ctx.metainfo.as_deref(),
+        &ctx.path,
+        ctx.size as u64,
+    )
+    .await
+    {
+        crate::seedbox::FileSource::Swarm => "swarm",
+        crate::seedbox::FileSource::Remote(_) => "seedbox",
+        crate::seedbox::FileSource::Pending(msg) => return Err(AppError::Unavailable(msg)),
+    };
 
     // Partial scan on first play if it hasn't been probed yet.
     if ctx.probe.is_none() && state.tools.can_probe() {
@@ -750,6 +851,7 @@ async fn play(
         "session_id": session_id,
         "mode": plan.mode,
         "reason": plan.reason,
+        "source": source,
         "url": url,
         "seekable": plan.mode == PlaybackMode::Direct,
         "duration": ctx.duration,

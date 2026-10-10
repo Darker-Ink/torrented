@@ -5,7 +5,9 @@ mod db;
 mod error;
 mod library;
 mod metadata;
+mod network;
 mod routes;
+mod seedbox;
 mod settings;
 mod state;
 mod streaming;
@@ -59,6 +61,7 @@ async fn main() -> anyhow::Result<()> {
         config.cache_dir(),
         config.peer_port,
         config.peers.clone(),
+        network::config_from_settings(&settings, &config.data_dir).await,
     )
     .await?;
 
@@ -74,6 +77,7 @@ async fn main() -> anyhow::Result<()> {
         settings,
         metadata: Metadata::new(http),
         engine: engine.clone(),
+        seedbox: seedbox::Seedbox::new(),
         tools,
         internal_key: util::random_token(32),
         stream_tokens: Default::default(),

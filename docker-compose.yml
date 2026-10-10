@@ -1,4 +1,4 @@
-# torrented — `docker compose up -d`, then open http://localhost:8080
+# torrented: `docker compose up -d`, then open http://localhost:8080
 #
 # The first visit walks you through creating the owner account. Everything
 # (databases + the temporary streaming cache) lives in the `torrented-data`
@@ -13,7 +13,7 @@ services:
     restart: unless-stopped
     ports:
       - "8080:8080"         # web UI
-      - "6881:6881/tcp"     # BitTorrent peers — forward this on your router for better speeds
+      - "6881:6881/tcp"     # BitTorrent peers; forward this on your router for better speeds
       - "6881:6881/udp"     # DHT / uTP
     environment:
       TZ: UTC
@@ -24,6 +24,14 @@ services:
       # TORRENTED_SECURE_COOKIES: "true"
       # Peers to always try, e.g. a seedbox (comma separated ip:port):
       # TORRENTED_PEERS: ""
+    # VPN: a SOCKS5 proxy or a tunnel that's already up need nothing extra
+    # here; pick them in Admin -> VPN & seedbox. For the built-in WireGuard
+    # tunnel, uncomment these four lines (creating the tunnel needs root and
+    # NET_ADMIN; only torrent traffic goes through it):
+    # user: "0:0"
+    # cap_add: [NET_ADMIN]
+    # devices:
+    #   - /dev/net/tun:/dev/net/tun
     volumes:
       - torrented-data:/data
       # Prefer a folder on the host? Swap the line above for the one below and

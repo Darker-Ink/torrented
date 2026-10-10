@@ -3,6 +3,7 @@ import {
   ChartBarIcon,
   Cog6ToothIcon,
   DocumentTextIcon,
+  GlobeAltIcon,
   ServerStackIcon,
   UsersIcon,
 } from "@heroicons/react/24/outline";
@@ -23,6 +24,7 @@ const AdminLayout = ({ title, description, actions, children, requires }: Props)
     { to: "/admin/torrents", label: "Torrents", icon: ServerStackIcon, show: can(user, PERM.MANAGE_TORRENTS) },
     { to: "/admin/library", label: "Library", icon: ArchiveBoxIcon, show: can(user, PERM.MANAGE_LIBRARY) },
     { to: "/admin/logs", label: "Logs", icon: DocumentTextIcon, show: can(user, PERM.VIEW_LOGS) },
+    { to: "/admin/network", label: "VPN & seedbox", icon: GlobeAltIcon, show: can(user, PERM.MANAGE_SETTINGS) },
     { to: "/admin/settings", label: "Settings", icon: Cog6ToothIcon, show: can(user, PERM.MANAGE_SETTINGS) },
   ].filter((l) => l.show);
 

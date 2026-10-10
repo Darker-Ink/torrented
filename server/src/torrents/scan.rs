@@ -231,6 +231,26 @@ pub async fn add_torrent(
     })
 }
 
+/// Fetch a magnet's metadata from peers, or through the seedbox when peers
+/// are off limits (seedbox only mode, or the VPN is down).
+pub async fn resolve_magnet(state: &AppState, magnet: &str) -> anyhow::Result<ResolvedTorrent> {
+    let seedbox = crate::seedbox::Config::load(&state.settings).await;
+    let use_seedbox = seedbox.as_ref().is_some_and(|c| c.mode == crate::seedbox::Mode::Only)
+        || (seedbox.is_some() && !state.engine.is_running());
+    if !use_seedbox {
+        return state.engine.resolve(TorrentSource::Magnet(magnet.to_string())).await;
+    }
+    let hash = magnet_info_hash(magnet).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let bytes = crate::seedbox::resolve_metadata(state, &hash, magnet).await?;
+    let mut resolved = super::engine::parse_metainfo(bytes)?;
+    for t in magnet_trackers(magnet) {
+        if !resolved.trackers.contains(&t) {
+            resolved.trackers.push(t);
+        }
+    }
+    Ok(resolved)
+}
+
 async fn set_job(state: &AppState, info_hash: &str, status: &str, error: Option<String>) {
     let _ = sqlx::query("UPDATE torrent_jobs SET status = ?, error = ?, updated_at = ? WHERE info_hash = ?")
         .bind(status)
@@ -250,7 +270,7 @@ async fn process(
 ) {
     let resolved = match resolved {
         Some(r) => r,
-        None => match state.engine.resolve(TorrentSource::Magnet(magnet.clone())).await {
+        None => match resolve_magnet(&state, &magnet).await {
             Ok(r) => r,
             Err(e) => {
                 tracing::warn!(info_hash, error = %e, "failed to resolve magnet");
@@ -274,6 +294,7 @@ async fn process(
     if let Err(e) = mark_requests_available(&state, media_id).await {
         tracing::warn!(error = %e, "failed to update requests");
     }
+    crate::seedbox::prefetch(&state, info_hash.clone(), magnet.clone(), Some(resolved.torrent_bytes.clone()));
 
     if state.tools.can_probe() && state.settings.probe_on_add().await {
         set_job(&state, &info_hash, "probing", None).await;
@@ -531,8 +552,11 @@ pub async fn probe_torrent(state: &AppState, torrent_id: i64) -> Vec<String> {
 #[derive(sqlx::FromRow)]
 struct ProbeTarget {
     info_hash: String,
+    magnet: String,
     metainfo: Option<Vec<u8>>,
     file_index: i64,
+    path: String,
+    size: i64,
 }
 
 /// Partially download a file's headers and record what's in it. Returns a
@@ -542,7 +566,7 @@ pub async fn probe_file(state: &AppState, file_id: i64) -> AppResult<Option<Stri
         return Err(AppError::bad_request("ffprobe is not installed"));
     }
     let target: ProbeTarget = sqlx::query_as(
-        "SELECT t.info_hash, t.metainfo, f.file_index FROM torrent_files f
+        "SELECT t.info_hash, t.magnet, t.metainfo, f.file_index, f.path, f.size FROM torrent_files f
          JOIN torrents t ON t.id = f.torrent_id WHERE f.id = ?",
     )
     .bind(file_id)
@@ -554,10 +578,27 @@ pub async fn probe_file(state: &AppState, file_id: i64) -> AppResult<Option<Stri
         .ok_or_else(|| AppError::bad_request("torrent has no metadata"))?;
 
     let _permit = PROBES.clone().acquire_owned().await.map_err(anyhow::Error::from)?;
-    let _lease = state
-        .engine
-        .acquire(&target.info_hash, Bytes::from(metainfo), target.file_index as usize)
-        .await?;
+    // Keep the torrent alive across ffprobe's requests, unless the file comes
+    // from a seedbox.
+    let source = crate::seedbox::locate(
+        state,
+        &target.info_hash,
+        Some(&target.magnet),
+        Some(&metainfo),
+        &target.path,
+        target.size as u64,
+    )
+    .await;
+    let _lease = match source {
+        crate::seedbox::FileSource::Swarm => Some(
+            state
+                .engine
+                .acquire(&target.info_hash, Bytes::from(metainfo), target.file_index as usize)
+                .await?,
+        ),
+        crate::seedbox::FileSource::Remote(_) => None,
+        crate::seedbox::FileSource::Pending(msg) => return Err(AppError::Unavailable(msg)),
+    };
     let probe = state
         .tools
         .probe(&state.internal_stream_url(file_id, crate::state::StreamPurpose::Probe))

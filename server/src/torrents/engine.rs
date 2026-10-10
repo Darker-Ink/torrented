@@ -7,20 +7,24 @@
 //! pieces. The cache directory is wiped on startup, so nothing accumulates.
 //! Only the read-ahead window of active streams is ever requested, and
 //! nothing is uploaded to other peers.
+//!
+//! Peer traffic can be sent through a VPN (see [`NetConfig`]). If the VPN
+//! isn't available the session is simply not started, so nothing ever leaks
+//! out over the normal connection.
 
 use std::{
     collections::{HashMap, HashSet},
     net::SocketAddr,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, RwLock},
     time::{Duration, Instant},
 };
 
 use anyhow::{Context, bail};
 use bytes::Bytes;
 use librqbit::{
-    AddTorrent, AddTorrentOptions, AddTorrentResponse, DhtSessionConfig, ListenerMode,
-    ListenerOptions, ManagedTorrent, Session, SessionOptions,
+    AddTorrent, AddTorrentOptions, AddTorrentResponse, ConnectionOptions, DhtSessionConfig,
+    ListenerMode, ListenerOptions, ManagedTorrent, Session, SessionOptions,
     api::TorrentIdOrHash,
     dht::DhtPersistenceConfig,
 };
@@ -97,14 +101,60 @@ pub struct FileProgress {
     pub peers: usize,
 }
 
+/// How the torrent session reaches the internet.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NetConfig {
+    /// Straight out of the default network.
+    Direct,
+    /// Peers and HTTP trackers through a SOCKS5 proxy
+    /// (`socks5://[user:pass@]host:port`). DHT, uTP, UDP trackers and incoming
+    /// connections can't be proxied, so they're turned off.
+    Socks5 { url: String },
+    /// Every socket bound to one network interface, e.g. a WireGuard or
+    /// OpenVPN tunnel.
+    Interface { name: String },
+    /// No peer-to-peer traffic at all: the VPN couldn't be brought up, or
+    /// everything is fetched through a seedbox.
+    Off { reason: String },
+}
+
+impl NetConfig {
+    pub fn describe(&self) -> String {
+        match self {
+            Self::Direct => "direct".into(),
+            Self::Socks5 { url } => {
+                let host = url::Url::parse(url)
+                    .ok()
+                    .and_then(|u| Some(format!("{}:{}", u.host_str()?, u.port()?)))
+                    .unwrap_or_default();
+                format!("SOCKS5 proxy {host}")
+            }
+            Self::Interface { name } => format!("interface {name}"),
+            Self::Off { .. } => "off".into(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct NetStatus {
+    /// "running" or "off".
+    pub state: &'static str,
+    pub route: String,
+    pub error: Option<String>,
+    pub listen_port: Option<u16>,
+}
+
 pub struct TorrentEngine {
-    session: Arc<Session>,
+    session: RwLock<Option<Arc<Session>>>,
+    status: RwLock<NetStatus>,
+    net: RwLock<NetConfig>,
+    data_dir: PathBuf,
+    peer_port: Option<u16>,
     static_peers: Vec<SocketAddr>,
     cache_dir: PathBuf,
     entries: Mutex<HashMap<String, Entry>>,
     add_lock: tokio::sync::Mutex<()>,
 }
-
 
 impl TorrentEngine {
     pub async fn start(
@@ -112,6 +162,7 @@ impl TorrentEngine {
         cache_dir: PathBuf,
         peer_port: Option<u16>,
         static_peers: Vec<SocketAddr>,
+        net: NetConfig,
     ) -> anyhow::Result<Arc<Self>> {
         // Nothing in the cache survives a restart.
         if cache_dir.exists() {
@@ -120,32 +171,80 @@ impl TorrentEngine {
                 .with_context(|| format!("clearing cache dir {}", cache_dir.display()))?;
         }
         tokio::fs::create_dir_all(&cache_dir).await?;
+        // Never download more than active streams are about to read.
+        librqbit::set_stream_only(true);
 
-        let listen_addr: SocketAddr = ([0, 0, 0, 0], peer_port.unwrap_or(0)).into();
+        let engine = Arc::new(Self {
+            session: RwLock::new(None),
+            status: RwLock::new(NetStatus { state: "off", route: "off".into(), error: None, listen_port: None }),
+            net: RwLock::new(NetConfig::Off { reason: "starting".into() }),
+            data_dir: data_dir.to_path_buf(),
+            peer_port,
+            static_peers,
+            cache_dir,
+            entries: Mutex::new(HashMap::new()),
+            add_lock: tokio::sync::Mutex::new(()),
+        });
+        engine.reconfigure(net).await;
+        Ok(engine)
+    }
+
+    /// Restart the session with a new network setup. Active streams are cut
+    /// off; players reconnect on their own.
+    pub async fn reconfigure(&self, net: NetConfig) {
+        let _guard = self.add_lock.lock().await;
+        let hashes: Vec<String> = self.entries.lock().unwrap().keys().cloned().collect();
+        for h in hashes {
+            let _ = self.evict_locked(&h).await;
+        }
+        let old = self.session.write().unwrap().take();
+        if let Some(old) = old {
+            old.stop().await;
+        }
+
+        let (session, error) = match &net {
+            NetConfig::Off { reason } => (None, Some(reason.clone())),
+            _ => match self.build_session(&net).await {
+                Ok(s) => (Some(s), None),
+                Err(e) => {
+                    tracing::error!(error = %format!("{e:#}"), route = %net.describe(), "torrent session not started");
+                    (None, Some(format!("{e:#}")))
+                }
+            },
+        };
+        let status = NetStatus {
+            state: if session.is_some() { "running" } else { "off" },
+            route: net.describe(),
+            error,
+            listen_port: session.as_ref().and_then(|s| s.listen_addr()).map(|a| a.port()),
+        };
+        tracing::info!(state = status.state, route = %status.route, listen = ?status.listen_port, "torrent network");
+        *self.session.write().unwrap() = session;
+        *self.status.write().unwrap() = status;
+        *self.net.write().unwrap() = net;
+    }
+
+    async fn build_session(&self, net: &NetConfig) -> anyhow::Result<Arc<Session>> {
+        let listen_addr: SocketAddr = ([0, 0, 0, 0], self.peer_port.unwrap_or(0)).into();
         // Local service discovery always uses IPv6 multicast.
         let ipv6 = std::net::UdpSocket::bind("[::]:0").is_ok();
         if !ipv6 {
             tracing::info!("IPv6 is unavailable on this host; using IPv4 only");
         }
-        let opts = SessionOptions {
-            dht: Some(DhtSessionConfig {
+        let dht = || {
+            Some(DhtSessionConfig {
                 persistence: Some(DhtPersistenceConfig {
                     dump_interval: None,
-                    config_filename: Some(data_dir.join("dht.json")),
+                    config_filename: Some(self.data_dir.join("dht.json")),
                 }),
                 ..Default::default()
-            }),
+            })
+        };
+        let base = SessionOptions {
             fastresume: false,
             persistence: None,
-            listen: Some(ListenerOptions {
-                mode: ListenerMode::TcpAndUtp,
-                listen_addr,
-                enable_upnp_port_forwarding: true,
-                ipv4_only: true,
-                ..Default::default()
-            }),
             ipv4_only: true,
-            disable_local_service_discovery: !ipv6,
+            disable_local_service_discovery: true,
             // Leech only: never advertise or serve pieces to other peers.
             disable_upload: true,
             // Each open stream holds one of these permits while it's alive.
@@ -154,20 +253,75 @@ impl TorrentEngine {
             client_name_and_version: Some(format!("torrented/{}", env!("CARGO_PKG_VERSION"))),
             ..Default::default()
         };
-        // Never download more than active streams are about to read.
-        librqbit::set_stream_only(true);
-        let session = Session::new_with_opts(cache_dir.clone(), opts)
+        let opts = match net {
+            NetConfig::Direct => SessionOptions {
+                dht: dht(),
+                listen: Some(ListenerOptions {
+                    mode: ListenerMode::TcpAndUtp,
+                    listen_addr,
+                    enable_upnp_port_forwarding: true,
+                    ipv4_only: true,
+                    ..Default::default()
+                }),
+                disable_local_service_discovery: !ipv6,
+                ..base
+            },
+            NetConfig::Socks5 { url } => SessionOptions {
+                dht: None,
+                listen: None,
+                connect: Some(ConnectionOptions {
+                    proxy_url: Some(url.clone()),
+                    ..Default::default()
+                }),
+                ..base
+            },
+            NetConfig::Interface { name } => {
+                if !interface_exists(name) {
+                    bail!("network interface {name} doesn't exist, is the VPN up?");
+                }
+                SessionOptions {
+                    dht: dht(),
+                    bind_device_name: Some(name.clone()),
+                    listen: Some(ListenerOptions {
+                        mode: ListenerMode::TcpAndUtp,
+                        listen_addr,
+                        enable_upnp_port_forwarding: false,
+                        ipv4_only: true,
+                        ..Default::default()
+                    }),
+                    ..base
+                }
+            }
+            NetConfig::Off { reason } => bail!("{reason}"),
+        };
+        let session = Session::new_with_opts(self.cache_dir.clone(), opts)
             .await
             .context("starting torrent session")?;
-        tracing::info!(listen = ?session.listen_addr(), "torrent session started");
+        Ok(session)
+    }
 
-        Ok(Arc::new(Self {
-            session,
-            static_peers,
-            cache_dir,
-            entries: Mutex::new(HashMap::new()),
-            add_lock: tokio::sync::Mutex::new(()),
-        }))
+    /// The running session, or why there isn't one.
+    fn session(&self) -> anyhow::Result<Arc<Session>> {
+        if let Some(s) = self.session.read().unwrap().as_ref() {
+            return Ok(s.clone());
+        }
+        let status = self.status.read().unwrap();
+        bail!(
+            "torrent network is off: {}",
+            status.error.as_deref().unwrap_or("not started")
+        )
+    }
+
+    pub fn is_running(&self) -> bool {
+        self.session.read().unwrap().is_some()
+    }
+
+    pub fn status(&self) -> NetStatus {
+        self.status.read().unwrap().clone()
+    }
+
+    pub fn net(&self) -> NetConfig {
+        self.net.read().unwrap().clone()
     }
 
     fn initial_peers(&self) -> Option<Vec<SocketAddr>> {
@@ -175,12 +329,16 @@ impl TorrentEngine {
     }
 
     pub fn listen_addr(&self) -> Option<SocketAddr> {
-        self.session.listen_addr()
+        self.session.read().unwrap().as_ref().and_then(|s| s.listen_addr())
     }
 
     /// Fetch a torrent's metadata (from the file itself, or from peers for a
     /// magnet link) without downloading any content.
     pub async fn resolve(&self, source: TorrentSource) -> anyhow::Result<ResolvedTorrent> {
+        if let TorrentSource::File(bytes) = &source {
+            return parse_metainfo(bytes.clone());
+        }
+        let session = self.session()?;
         let (add, magnet_trackers) = match &source {
             TorrentSource::Magnet(m) => {
                 let trackers = url::Url::parse(m)
@@ -200,7 +358,7 @@ impl TorrentEngine {
             initial_peers: self.initial_peers(),
             ..Default::default()
         };
-        let res = tokio::time::timeout(RESOLVE_TIMEOUT, self.session.add_torrent(add, Some(opts)))
+        let res = tokio::time::timeout(RESOLVE_TIMEOUT, session.add_torrent(add, Some(opts)))
             .await
             .map_err(|_| anyhow::anyhow!("timed out fetching torrent metadata from peers"))??;
 
@@ -283,6 +441,7 @@ impl TorrentEngine {
         file_index: usize,
     ) -> anyhow::Result<Lease> {
         let _guard = self.add_lock.lock().await;
+        let session = self.session()?;
         let existing = {
             let mut entries = self.entries.lock().unwrap();
             entries.get_mut(info_hash).map(|e| {
@@ -301,10 +460,10 @@ impl TorrentEngine {
 
         if let Some((handle, newly_selected, selected)) = existing {
             if newly_selected {
-                self.session.update_only_files(&handle, &selected).await?;
+                session.update_only_files(&handle, &selected).await?;
             }
             if handle.is_paused() {
-                self.session.unpause(&handle).await?;
+                session.unpause(&handle).await?;
             }
             return Ok(lease);
         }
@@ -317,8 +476,7 @@ impl TorrentEngine {
             initial_peers: self.initial_peers(),
             ..Default::default()
         };
-        let res = self
-            .session
+        let res = session
             .add_torrent(AddTorrent::from_bytes(torrent_bytes), Some(opts))
             .await;
         let handle = match res {
@@ -334,7 +492,7 @@ impl TorrentEngine {
             .and_then(|r| r)
         {
             std::mem::forget(lease);
-            let _ = self.session.delete(handle.id().into(), true).await;
+            let _ = session.delete(handle.id().into(), true).await;
             return Err(e);
         }
 
@@ -447,12 +605,15 @@ impl TorrentEngine {
 
     /// Stop a torrent and delete its cached data.
     pub async fn evict(&self, info_hash: &str) -> anyhow::Result<()> {
+        self.evict_locked(info_hash).await
+    }
+
+    async fn evict_locked(&self, info_hash: &str) -> anyhow::Result<()> {
         let entry = self.entries.lock().unwrap().remove(info_hash);
-        if let Some(e) = entry {
+        let session = self.session.read().unwrap().clone();
+        if let (Some(e), Some(session)) = (entry, session) {
             tracing::info!(info_hash, name = %e.name, "evicting torrent from cache");
-            self.session
-                .delete(TorrentIdOrHash::Id(e.handle.id()), true)
-                .await?;
+            session.delete(TorrentIdOrHash::Id(e.handle.id()), true).await?;
         }
         let dir = self.cache_dir.join(info_hash);
         if dir.exists() {
@@ -523,7 +684,10 @@ impl TorrentEngine {
         for h in hashes {
             let _ = self.evict(&h).await;
         }
-        self.session.stop().await;
+        let session = self.session.write().unwrap().take();
+        if let Some(s) = session {
+            s.stop().await;
+        }
     }
 }
 
@@ -564,6 +728,55 @@ fn dir_usage(path: &Path) -> u64 {
     let mut total = 0;
     walk(path, &mut total);
     total
+}
+
+/// Read a .torrent file without touching the network.
+pub fn parse_metainfo(bytes: Bytes) -> anyhow::Result<ResolvedTorrent> {
+    let parsed = librqbit::torrent_from_bytes(&bytes).context("not a valid .torrent file")?;
+    let trackers: Vec<String> = parsed
+        .iter_announce()
+        .map(|t| String::from_utf8_lossy(t.as_ref()).into_owned())
+        .fold(Vec::new(), |mut acc, t| {
+            if !acc.contains(&t) {
+                acc.push(t);
+            }
+            acc
+        });
+    let info_hash = parsed.info_hash.as_string();
+    let info = parsed.info.data.clone().validate().context("invalid torrent metadata")?;
+    let files = info
+        .iter_file_details_ext()
+        .enumerate()
+        .filter(|(_, f)| !f.details.attrs().padding)
+        .map(|(index, f)| ResolvedFile {
+            index,
+            path: f.details.filename.to_vec().join("/"),
+            size: f.details.len,
+        })
+        .collect::<Vec<_>>();
+    Ok(ResolvedTorrent {
+        name: info.name().map(|n| n.into_owned()).unwrap_or_else(|| info_hash.clone()),
+        info_hash,
+        total_size: files.iter().map(|f| f.size).sum(),
+        piece_length: info.info().piece_length,
+        files,
+        torrent_bytes: bytes.clone(),
+        trackers,
+    })
+}
+
+#[cfg(unix)]
+pub fn interface_exists(name: &str) -> bool {
+    std::path::Path::new("/sys/class/net").join(name).exists() || {
+        let Ok(c) = std::ffi::CString::new(name) else { return false };
+        // SAFETY: if_nametoindex only reads the NUL-terminated string.
+        unsafe { libc::if_nametoindex(c.as_ptr()) != 0 }
+    }
+}
+
+#[cfg(not(unix))]
+pub fn interface_exists(_name: &str) -> bool {
+    true
 }
 
 pub fn validate_magnet(s: &str) -> anyhow::Result<()> {

@@ -21,6 +21,9 @@ pub enum AppError {
     Conflict(String),
     #[error("{0}")]
     Upstream(String),
+    /// Not possible right now, e.g. a seedbox is still downloading.
+    #[error("{0}")]
+    Unavailable(String),
     #[error(transparent)]
     Database(#[from] sqlx::Error),
     #[error(transparent)]
@@ -52,6 +55,7 @@ impl AppError {
             Self::NotFound(_) => StatusCode::NOT_FOUND,
             Self::Conflict(_) => StatusCode::CONFLICT,
             Self::Upstream(_) => StatusCode::BAD_GATEWAY,
+            Self::Unavailable(_) => StatusCode::SERVICE_UNAVAILABLE,
             Self::Database(sqlx::Error::RowNotFound) => StatusCode::NOT_FOUND,
             Self::Database(_) | Self::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }

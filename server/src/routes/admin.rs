@@ -98,6 +98,7 @@ async fn overview(State(state): State<AppState>, CurrentUser(user): CurrentUser)
             "cache_bytes": state.engine.cache_usage(),
             "cache_limit": state.settings.cache_max_bytes().await,
             "listen_addr": state.engine.listen_addr(),
+            "network": state.engine.status(),
         },
         "tools": state.tools,
     })))
@@ -342,6 +343,10 @@ async fn put_settings(
     }
     if !changed.is_empty() {
         audit::log(&state, Some(&user), &client, "settings.update", None, Some(json!({ "keys": changed }))).await;
+    }
+    // VPN and seedbox changes restart the torrent session.
+    if changed.iter().any(|k| k.starts_with("vpn_") || k == "seedbox_provider" || k == "seedbox_mode" || k == "seedbox_api_key") {
+        crate::network::apply(&state).await;
     }
     Ok(Json(json!({
         "definitions": settings::DEFS,

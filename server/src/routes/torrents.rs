@@ -216,11 +216,13 @@ async fn sources(
     .fetch_all(&state.main)
     .await?;
 
+    let seedbox = seedbox_states(&state).await;
     let mut out = Vec::new();
     for t in torrents {
         let files = load_files(&state, t.id).await?;
         let job = jobs.iter().find(|j| j.info_hash == t.info_hash);
-        out.push(json!({ "torrent": t, "files": files, "job": job }));
+        let remote = seedbox_entry(&seedbox, &t.info_hash);
+        out.push(json!({ "torrent": t, "files": files, "job": job, "seedbox": remote }));
     }
     let pending: Vec<&JobRow> = jobs
         .iter()
@@ -257,16 +259,38 @@ async fn list_all(State(state): State<AppState>, CurrentUser(user): CurrentUser)
     let jobs: Vec<JobRow> = sqlx::query_as(&format!("{JOB_SELECT} ORDER BY j.created_at DESC"))
         .fetch_all(&state.main)
         .await?;
+    let seedbox = seedbox_states(&state).await;
     let rows: Vec<Value> = rows
         .into_iter()
         .map(|r| {
             let job = jobs.iter().find(|j| j.info_hash == r.info_hash);
             let mut v = json!(r);
             v["job"] = json!(job);
+            v["seedbox"] = seedbox_entry(&seedbox, &r.info_hash);
             v
         })
         .collect();
     Ok(Json(json!(rows)))
+}
+
+/// What the seedbox has, by info hash. `None` when no seedbox is set up,
+/// an error message when it couldn't be asked.
+async fn seedbox_states(
+    state: &AppState,
+) -> Option<Result<std::collections::HashMap<String, crate::seedbox::RemoteState>, String>> {
+    let cfg = crate::seedbox::Config::load(&state.settings).await?;
+    Some(state.seedbox.states(&cfg.api_key).await.map_err(|e| format!("{e:#}")))
+}
+
+fn seedbox_entry(
+    states: &Option<Result<std::collections::HashMap<String, crate::seedbox::RemoteState>, String>>,
+    info_hash: &str,
+) -> Value {
+    match states {
+        None => Value::Null,
+        Some(Err(e)) => json!({ "state": "error", "error": e }),
+        Some(Ok(map)) => json!(map.get(&info_hash.to_ascii_lowercase()).cloned().unwrap_or(crate::seedbox::RemoteState::Missing)),
+    }
 }
 
 async fn active(State(state): State<AppState>, CurrentUser(user): CurrentUser) -> AppResult<Json<Value>> {

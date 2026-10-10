@@ -1,21 +1,34 @@
 import { useQuery } from "@tanstack/react-query";
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import Spinner from "@/features/ui/components/Spinner";
-import { api, errorMessage, qs } from "@/lib/api";
+import { api, ApiError, errorMessage, qs } from "@/lib/api";
 import { kindFromSegment, parseEpisodeSlug, tmdbIdFromSlug } from "@/lib/urls";
 import type { PlayInfo } from "@/lib/types";
 import { usePlayInfo } from "../hooks/usePlayback";
 import VideoPlayer from "./VideoPlayer";
 
-const Message = ({ title, body, onBack }: { title: string; body?: string; onBack: () => void }) => (
+type MessageProps = { title: string; body?: string; onBack: () => void; onRetry?: () => void; retrying?: boolean };
+
+const Message = ({ title, body, onBack, onRetry, retrying }: MessageProps) => (
   <div className="fixed inset-0 grid place-items-center bg-black p-6 text-center">
     <div className="space-y-4">
       <p className="text-lg font-semibold">{title}</p>
       {body && <p className="text-sm text-white/60">{body}</p>}
-      <button onClick={onBack} className="rounded-md bg-white/10 px-4 py-2 text-sm font-semibold hover:bg-white/20">
-        Go back
-      </button>
+      <div className="flex justify-center gap-2">
+        {onRetry && (
+          <button
+            onClick={onRetry}
+            disabled={retrying}
+            className="rounded-md bg-primary px-4 py-2 text-sm font-bold text-on-primary disabled:opacity-60"
+          >
+            {retrying ? "Checking…" : "Try again"}
+          </button>
+        )}
+        <button onClick={onBack} className="rounded-md bg-white/10 px-4 py-2 text-sm font-semibold hover:bg-white/20">
+          Go back
+        </button>
+      </div>
     </div>
   </div>
 );
@@ -65,10 +78,30 @@ const WatchRoute = () => {
 
   const back = () => (window.history.length > 1 ? navigate(-1) : navigate("/"));
 
+  // A seedbox that's still downloading answers 503: check again now and then.
+  const waiting = play.error instanceof ApiError && play.error.status === 503;
+  const { refetch } = play;
+  useEffect(() => {
+    if (!waiting) return;
+    const t = window.setInterval(() => refetch(), 15_000);
+    return () => window.clearInterval(t);
+  }, [waiting, refetch]);
+
   if (!kind || tmdbId === null || (params.episode && !episode)) {
     return <Message title="That link doesn't look right" onBack={back} />;
   }
   if (resolved.error) return <Message title="Can't play this" body={errorMessage(resolved.error)} onBack={back} />;
+  if (waiting) {
+    return (
+      <Message
+        title="Not ready yet"
+        body={`${errorMessage(play.error)}. This page checks again every few seconds.`}
+        onBack={back}
+        onRetry={() => refetch()}
+        retrying={play.isFetching}
+      />
+    );
+  }
   if (play.error) return <Message title="Can't play this" body={errorMessage(play.error)} onBack={back} />;
   if (!shown) return <Loading />;
   return <VideoPlayer info={shown} startAt={t} />;

@@ -39,6 +39,14 @@ It's one binary. Run it, open the browser, finish the setup wizard.
 - **Requests can come with a torrent** – a suggested torrent is checked
   automatically (right title, the requested seasons, real video files,
   quality, seeders from a tracker scrape) and attached when approved.
+- **VPN for torrent traffic** – send peer traffic through a SOCKS5 proxy, an
+  existing tunnel interface (`wg0`, `tun0`, ...) or a WireGuard config pasted
+  into the admin page. Only torrent traffic uses it, and if the VPN is down
+  nothing is sent at all.
+- **Seedbox support** – with a [TorBox](https://torbox.app) API key, torrents
+  are fetched by TorBox (without seeding) and streamed over HTTPS, either
+  whenever TorBox has the files or exclusively, with no peer-to-peer
+  connections from your server at all.
 - **Two databases** – `main.db` holds instance data (accounts, progress, logs,
   settings). `media.db` holds only the library (titles, episodes, torrents and
   what's in them), so it can be exported and imported into another server.
@@ -60,6 +68,27 @@ keeps everything in the `torrented-data` volume. Forward port `6881` (TCP and
 UDP) on your router for better speeds. See `docker-compose.yml` for the
 available options; to build the image yourself use `docker compose build` with
 the `build: .` line uncommented, or `docker build -t torrented .`.
+
+### VPN and seedbox
+
+Both are set up in **Admin → VPN & seedbox**, which also has a *Check IP*
+button showing the address peers see next to the server's own.
+
+| VPN mode | What it does |
+| --- | --- |
+| SOCKS5 proxy | Peers and HTTP trackers go through the proxy. DHT, uTP, UDP trackers and incoming connections are turned off, since they can't be proxied. |
+| Existing interface | Every torrent socket is bound to that interface. If it disappears, traffic stops instead of falling back. |
+| WireGuard | Paste a provider's `.conf`. torrented creates its own `torrented0` tunnel and routes only torrent traffic through it, so the web UI stays reachable as usual. Linux only; needs root and `NET_ADMIN` (see the commented lines in `docker-compose.yml`). Uses the kernel module, or `wireguard-go` when there isn't one. |
+
+Already running everything behind a VPN container such as
+[gluetun](https://github.com/qdm12/gluetun)? Put torrented in its network
+(`network_mode: service:gluetun`) and leave the VPN mode off.
+
+With a TorBox seedbox in **prefer** mode, files stream from TorBox once it has
+them and from peers until then. In **seedbox only** mode the torrent session
+never starts: metadata, file scans and playback all go through TorBox, and a
+title that TorBox is still downloading shows a "not ready yet" screen until it
+can play.
 
 ### Binary
 

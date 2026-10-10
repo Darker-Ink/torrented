@@ -26,6 +26,7 @@ import type { Sources, TorrentJob } from "@/lib/types";
 import { useSources, useTorrentActions } from "../hooks/queries";
 import AddTorrentDialog from "./AddTorrentDialog";
 import FileTable from "./FileTable";
+import SeedboxBadge from "./SeedboxBadge";
 
 type Props = { mediaId: number; title: string; kind: "movie" | "tv" };
 
@@ -63,7 +64,7 @@ const TorrentEntry = ({
   kind: "movie" | "tv";
   defaultOpen: boolean;
 }) => {
-  const { torrent, files, job } = entry;
+  const { torrent, files, job, seedbox } = entry;
   const user = useUser();
   const { remove, remap, probe } = useTorrentActions(mediaId);
   const [open, setOpen] = useState(defaultOpen);
@@ -89,9 +90,12 @@ const TorrentEntry = ({
       <div className="flex items-center gap-4 p-4 sm:p-5">
         <QualityTile resolution={torrent.resolution} />
         <button onClick={() => setOpen((o) => !o)} className="min-w-0 flex-1 space-y-1 text-left">
-          <p className="truncate font-semibold" title={torrent.name}>
-            {torrent.name}
-          </p>
+          <div className="flex min-w-0 items-center gap-2">
+            <p className="truncate font-semibold" title={torrent.name}>
+              {torrent.name}
+            </p>
+            <SeedboxBadge state={seedbox} />
+          </div>
           <p className="truncate text-sm text-muted">
             {[
               tags.join(" · ") || null,

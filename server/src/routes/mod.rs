@@ -2,6 +2,7 @@ mod admin;
 mod auth;
 mod discover;
 mod library;
+mod network;
 mod progress;
 mod requests;
 mod stream;
@@ -40,6 +41,7 @@ pub fn router(state: AppState) -> Router {
         .merge(progress::router())
         .merge(requests::router())
         .merge(admin::router())
+        .merge(network::router())
         .fallback(api_not_found);
 
     let app = Router::new()

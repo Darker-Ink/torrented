@@ -285,6 +285,12 @@ pub fn evaluate(
             Verdict::Warn,
             "No trackers listed, so seeders can't be counted. It will rely on DHT.",
         ),
+        Some(SwarmStats { skipped: Some(reason), .. }) => check(
+            "seeders",
+            "Has seeders",
+            Verdict::Warn,
+            format!("Not checked: {reason}"),
+        ),
         Some(s) if s.trackers_answered == 0 => check(
             "seeders",
             "Has seeders",
@@ -393,7 +399,7 @@ async fn run(state: &AppState, request_id: i64) {
     let resolved = match &req.torrent_metainfo {
         Some(bytes) => state.engine.resolve(TorrentSource::File(Bytes::from(bytes.clone()))).await,
         None => match scan::parse_source(&source) {
-            Ok(AddInput::Magnet(m)) => state.engine.resolve(TorrentSource::Magnet(m)).await,
+            Ok(AddInput::Magnet(m)) => scan::resolve_magnet(state, &m).await,
             Ok(_) => Err(anyhow::anyhow!("the .torrent file is missing")),
             Err(e) => Err(anyhow::anyhow!("{e}")),
         },
@@ -424,8 +430,23 @@ async fn run(state: &AppState, request_id: i64) {
         }
     };
 
-    let swarm = scrape::scrape(&resolved.trackers, &resolved.info_hash).await;
+    let swarm = scrape::scrape(&resolved.trackers, &resolved.info_hash, &state.engine.net()).await;
     let mut review = evaluate(&resolved, &details, req.seasons.as_ref().map(|s| s.0.as_slice()), swarm.as_ref());
+
+    if let Some(cfg) = crate::seedbox::Config::load(&state.settings).await {
+        let c = match state.seedbox.is_cached(&cfg.api_key, &resolved.info_hash).await {
+            Ok(true) => check("seedbox", "Ready on TorBox", Verdict::Pass, "Already cached, streams right away"),
+            Ok(false) => check(
+                "seedbox",
+                "Ready on TorBox",
+                Verdict::Warn,
+                "Not cached yet, TorBox downloads it before it can stream",
+            ),
+            Err(e) => check("seedbox", "Ready on TorBox", Verdict::Warn, format!("Couldn't ask TorBox: {e:#}")),
+        };
+        review.checks.push(c);
+        review.verdict = review.checks.iter().map(|c| c.status).max().unwrap_or(Verdict::Pass);
+    }
 
     // Someone else may have attached the same torrent in the meantime.
     let attached_to: Option<String> = sqlx::query_scalar(
@@ -574,7 +595,7 @@ mod tests {
         let files: Vec<(&str, u64)> = files.iter().map(|(p, s)| (p.as_str(), *s)).collect();
         let t = torrent("Severance.S01.1080p.WEB.H264-GROUP", &files);
         let d = details(MediaKind::Tv, "Severance", 2022, &[(1, 10), (2, 10)]);
-        let swarm = SwarmStats { seeders: 40, leechers: 3, completed: None, trackers_answered: 2, trackers_tried: 3 };
+        let swarm = SwarmStats { seeders: 40, leechers: 3, completed: None, trackers_answered: 2, trackers_tried: 3, skipped: None };
 
         let r = evaluate(&t, &d, Some(&[1]), Some(&swarm));
         assert_eq!(status(&r, "title"), Verdict::Pass);
@@ -609,7 +630,7 @@ mod tests {
         assert_eq!(r.video_count, 1);
 
         let t = torrent("Arrival.2016.CAM", &[("Arrival.txt", 1000)]);
-        let swarm = SwarmStats { seeders: 0, leechers: 9, completed: None, trackers_answered: 1, trackers_tried: 1 };
+        let swarm = SwarmStats { seeders: 0, leechers: 9, completed: None, trackers_answered: 1, trackers_tried: 1, skipped: None };
         let r = evaluate(&t, &d, None, Some(&swarm));
         assert_eq!(status(&r, "video"), Verdict::Fail);
         assert_eq!(status(&r, "quality"), Verdict::Warn);
