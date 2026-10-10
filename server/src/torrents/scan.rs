@@ -298,8 +298,16 @@ async fn store_resolved(
         .bind(if sample { "ignored" } else { "auto" })
         .bind(language)
         .bind(parser::extension(&f.path))
-        .bind(parsed.release.resolution.or(release.resolution.clone()))
-        .bind(parsed.release.video_codec.or(release.video_codec.clone()))
+        .bind(
+            (kind == FileKind::Video)
+                .then(|| parsed.release.resolution.or(release.resolution.clone()))
+                .flatten(),
+        )
+        .bind(
+            (kind == FileKind::Video)
+                .then(|| parsed.release.video_codec.or(release.video_codec.clone()))
+                .flatten(),
+        )
         .execute(&mut *tx)
         .await?;
     }
