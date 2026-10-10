@@ -99,6 +99,29 @@ impl MediaTools {
         Ok(ProbeResult::from_json(&v))
     }
 
+    /// The keyframe at or before `t`. When the video is copied rather than
+    /// re-encoded, a seek can only start on a keyframe, so this is where the
+    /// remuxed stream really begins.
+    pub async fn keyframe_before(&self, url: &str, t: f64) -> anyhow::Result<Option<f64>> {
+        let bin = self.ffprobe.as_deref().context("ffprobe is not available")?;
+        let child = Command::new(bin)
+            .args(["-v", "error", "-rw_timeout", "60000000", "-read_intervals"])
+            .arg(format!("{t:.3}%+#1"))
+            .args(["-select_streams", "v:0", "-show_entries", "packet=pts_time,flags", "-of", "csv=p=0", url])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .kill_on_drop(true)
+            .spawn()
+            .context("starting ffprobe")?;
+        let out = tokio::time::timeout(Duration::from_secs(20), child.wait_with_output())
+            .await
+            .map_err(|_| anyhow::anyhow!("ffprobe timed out"))??;
+        Ok(String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .filter_map(|l| l.split(',').next()?.trim().parse::<f64>().ok())
+            .find(|k| *k <= t + 0.001))
+    }
+
     /// Spawn ffmpeg writing fragmented MP4 to stdout.
     pub fn spawn_stream(&self, url: &str, opts: &TranscodeOptions) -> anyhow::Result<Child> {
         let bin = self.ffmpeg.as_deref().context("ffmpeg is not available")?;
@@ -106,7 +129,17 @@ impl MediaTools {
         cmd.args(["-hide_banner", "-loglevel", "error", "-nostdin"]);
         cmd.args(["-reconnect", "1", "-reconnect_streamed", "1", "-rw_timeout", "120000000"]);
         if opts.start > 0.0 {
-            cmd.args(["-ss", &format!("{:.3}", opts.start)]);
+            if opts.transcode_video {
+                cmd.args(["-ss", &format!("{:.3}", opts.start)]);
+            } else {
+                // Copied video starts on the keyframe at or before -ss, which
+                // the player looked up beforehand (see `keyframe_before`). Use
+                // the timestamp as-is rather than shifted by the file's start
+                // time (negative with Opus/AAC priming), and nudge past
+                // ffmpeg's B-frame allowance, so the seek lands on that same
+                // keyframe instead of the one before it.
+                cmd.args(["-seek_timestamp", "1", "-ss", &format!("{:.3}", opts.start + 0.15)]);
+            }
         }
         cmd.args(["-i", url]);
         cmd.args(["-map", "0:v:0"]);

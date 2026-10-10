@@ -6,7 +6,7 @@ import { api, errorMessage } from "@/lib/api";
 import { episodeCode, formatBytes, formatClock } from "@/lib/format";
 import { img } from "@/lib/images";
 import { normalizeLang, storage } from "@/lib/storage";
-import type { PlayInfo } from "@/lib/types";
+import type { PlayInfo, SubtitleOption } from "@/lib/types";
 import { titleUrl, watchUrl } from "@/lib/urls";
 import { castSupported, useCast } from "../hooks/useCast";
 import { reportProgress } from "../hooks/usePlayback";
@@ -43,6 +43,52 @@ const KEYS = {
   subtitleSize: "torrented.subtitleSize",
   subtitleStyle: "torrented.subtitleStyle",
   autoplay: "torrented.autoplay",
+  speed: "torrented.speed",
+  remaining: "torrented.showRemaining",
+};
+
+type SubtitlePref = { language: string | null; label: string; embedded: boolean };
+
+/** Pick the remembered subtitle track for a file: same language first, then
+ * the same label, then any track of the same kind. */
+const pickSubtitle = (tracks: SubtitleOption[]): string => {
+  const raw = storage.get(KEYS.subtitles);
+  if (!raw || raw === "off") return "off";
+  let pref: SubtitlePref;
+  try {
+    pref = JSON.parse(raw);
+  } catch {
+    pref = { language: raw, label: "", embedded: false }; // older plain-language value
+  }
+  const lang = normalizeLang(pref.language);
+  const match =
+    (lang && tracks.find((t) => normalizeLang(t.language) === lang)) ||
+    tracks.find((t) => t.label === pref.label) ||
+    (!lang ? tracks.find((t) => t.embedded === pref.embedded) : undefined);
+  return match?.id ?? "off";
+};
+
+const rememberSubtitle = (track: SubtitleOption | null) =>
+  storage.set(
+    KEYS.subtitles,
+    track ? JSON.stringify({ language: track.language, label: track.label, embedded: track.embedded }) : "off",
+  );
+
+/** Start of the first fragment of a remuxed stream asked to begin at `t`. */
+const resolveStart = async (fileId: number, streamUrl: string, t: number) => {
+  if (t <= 0) return 0;
+  const params = new URLSearchParams(streamUrl.split("?")[1] ?? "");
+  const query = new URLSearchParams({ t: t.toFixed(3) });
+  for (const k of ["hevc", "ac3", "token"]) {
+    const v = params.get(k);
+    if (v) query.set(k, v);
+  }
+  try {
+    const res = await api.get<{ start: number }>(`/stream/${fileId}/seek-point?${query}`);
+    return Number.isFinite(res.start) ? res.start : t;
+  } catch {
+    return t;
+  }
 };
 
 const SPEEDS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
@@ -71,7 +117,11 @@ const VideoPlayer = ({ info: original, startAt }: Props) => {
   const baseUrl = compat && info.mode === "direct" ? `/api/stream/${info.file_id}/transcode?sid=${info.session_id}` : info.url;
 
   const validResume = info.resume_at > 10 && (!info.duration || info.resume_at < info.duration * 0.95);
-  const [offset, setOffset] = useState(!seekable && validResume ? info.resume_at : 0);
+  // Remuxed streams can't seek; they restart at `startAt`. The stream really
+  // begins on the keyframe before it, which becomes `offset` once known.
+  const [startReq, setStartReq] = useState(() => ({ at: info.mode !== "direct" && validResume ? info.resume_at : 0, n: 0 }));
+  const [offset, setOffset] = useState<number | null>(null);
+  const restartAt = useCallback((at: number) => setStartReq((r) => ({ at, n: r.n + 1 })), []);
   const [audio, setAudio] = useState<number | null>(null);
   const [current, setCurrent] = useState(validResume ? info.resume_at : 0);
   const [mediaDuration, setMediaDuration] = useState<number | null>(null);
@@ -88,8 +138,8 @@ const VideoPlayer = ({ info: original, startAt }: Props) => {
   const [upNextDismissed, setUpNextDismissed] = useState(false);
   const [countdown, setCountdown] = useState(10);
   const [flash, setFlash] = useState<Flash | null>(null);
-  const [showRemaining, setShowRemaining] = useState(true);
-  const [speed, setSpeed] = useState(1);
+  const [showRemaining, setShowRemaining] = useState(() => storage.get(KEYS.remaining) !== "false");
+  const [speed, setSpeed] = useState(() => Number(storage.get(KEYS.speed)) || 1);
   const [loop, setLoop] = useState(false);
   const [stats, setStats] = useState(false);
   const [shortcuts, setShortcuts] = useState(false);
@@ -101,19 +151,52 @@ const VideoPlayer = ({ info: original, startAt }: Props) => {
   const pulse = (kind: Flash["kind"]) => setFlash({ kind, key: Date.now() });
 
   // Subtitles: pick the remembered language, external files first.
-  const [subtitle, setSubtitle] = useState<string>(() => {
-    const pref = storage.get(KEYS.subtitles);
-    if (!pref || pref === "off") return "off";
-    const match = info.subtitles.find((s) => normalizeLang(s.language) === normalizeLang(pref));
-    return match?.id ?? "off";
-  });
+  const [subtitle, setSubtitle] = useState<string>(() => pickSubtitle(info.subtitles));
+
+  // The player stays mounted from one episode to the next so fullscreen,
+  // picture-in-picture and settings carry over. Only per-file state resets.
+  const [sessionId, setSessionId] = useState(info.session_id);
+  if (sessionId !== info.session_id) {
+    setSessionId(info.session_id);
+    setCompat(false);
+    setStartReq((r) => ({ at: info.mode !== "direct" && validResume ? info.resume_at : 0, n: r.n + 1 }));
+    setOffset(null);
+    setAudio(null);
+    setCurrent(validResume ? info.resume_at : 0);
+    setMediaDuration(null);
+    setBuffered(0);
+    setBuffering(true);
+    setStarted(false);
+    setError(null);
+    setResumedNote(validResume);
+    setUpNextDismissed(false);
+    setCountdown(10);
+    setMenuAt(null);
+    setSubtitle(pickSubtitle(info.subtitles));
+  }
   const lastSubtitle = useRef<string | null>(subtitle !== "off" ? subtitle : null);
   const activeTrack = info.subtitles.find((s) => s.id === subtitle) ?? null;
   const cueText = useSubtitles(activeTrack, current);
 
+  useEffect(() => {
+    if (seekable) return;
+    let stale = false;
+    setOffset(null);
+    resolveStart(info.file_id, baseUrl, startReq.at).then((k) => {
+      if (stale) return;
+      setOffset(k);
+      setCurrent(k);
+    });
+    return () => {
+      stale = true;
+    };
+  }, [seekable, startReq, info.file_id, baseUrl]);
+
   const src = seekable
     ? baseUrl
-    : `${baseUrl}&start=${offset.toFixed(2)}${audio !== null ? `&audio=${audio}` : ""}`;
+    : offset === null
+      ? undefined
+      : `${baseUrl}&start=${offset.toFixed(3)}${audio !== null ? `&audio=${audio}` : ""}`;
   const duration = seekable ? (mediaDuration ?? info.duration) : info.duration;
 
   // ---- Casting -------------------------------------------------------------
@@ -124,17 +207,14 @@ const VideoPlayer = ({ info: original, startAt }: Props) => {
   const shownTime = casting ? castTime : current;
 
   // Keep a ref of the latest position for unmount reporting.
-  const latest = useRef({ current: shownTime, duration });
-  latest.current = { current: shownTime, duration };
+  const latest = useRef({ current: shownTime, duration, fileId: info.file_id, sessionId: info.session_id });
+  latest.current = { current: shownTime, duration, fileId: info.file_id, sessionId: info.session_id };
 
-  const report = useCallback(
-    (beacon = false) => {
-      const { current: pos, duration: dur } = latest.current;
-      if (pos < 1) return;
-      reportProgress({ file_id: info.file_id, position: pos, duration: dur, session_id: info.session_id }, beacon);
-    },
-    [info.file_id, info.session_id],
-  );
+  const report = useCallback((beacon = false) => {
+    const { current: pos, duration: dur, fileId, sessionId: sid } = latest.current;
+    if (pos < 1) return;
+    reportProgress({ file_id: fileId, position: pos, duration: dur, session_id: sid }, beacon);
+  }, []);
 
   useEffect(() => {
     if (!playing && !(casting && !cast.paused)) return;
@@ -160,6 +240,7 @@ const VideoPlayer = ({ info: original, startAt }: Props) => {
 
   useEffect(() => {
     if (videoRef.current) videoRef.current.playbackRate = speed;
+    storage.set(KEYS.speed, String(speed));
   }, [speed]);
 
   useEffect(() => {
@@ -222,15 +303,17 @@ const VideoPlayer = ({ info: original, startAt }: Props) => {
       const { token } = await api.post<{ token: string }>(`/play/${info.file_id}/cast`);
       const origin = window.location.origin;
       const direct = mode === "direct";
+      const at = direct ? start : await resolveStart(info.file_id, `?token=${token}`, start);
       const url = direct
         ? `${origin}/api/stream/${info.file_id}?token=${token}`
-        : `${origin}/api/stream/${info.file_id}/transcode?token=${token}&start=${start.toFixed(2)}`;
+        : `${origin}/api/stream/${info.file_id}/transcode?token=${token}&start=${at.toFixed(3)}`;
       const ext = info.file.path.split(".").pop()?.toLowerCase();
       return {
         token,
         url,
         contentType: !direct ? "video/mp4" : ext === "webm" ? "video/webm" : "video/mp4",
         startTime: direct ? start : 0,
+        offset: direct ? 0 : at,
       };
     },
     [info.file_id, info.file.path, mode],
@@ -246,7 +329,7 @@ const VideoPlayer = ({ info: original, startAt }: Props) => {
         } else {
           // Remuxed streams restart on the device at the new position.
           castUrl(target).then((m) => {
-            castOffset.current = target;
+            castOffset.current = m.offset;
             return cast.start({ ...m, title: info.media.title, tracks: [], startTime: 0 });
           });
         }
@@ -259,10 +342,10 @@ const VideoPlayer = ({ info: original, startAt }: Props) => {
         v.currentTime = target;
       } else {
         setBuffering(true);
-        setOffset(target);
+        restartAt(target);
       }
     },
-    [duration, seekable, casting, mode, cast, castUrl, info.media.title],
+    [duration, seekable, casting, mode, cast, castUrl, info.media.title, restartAt],
   );
 
   const toggleFullscreen = useCallback(() => {
@@ -285,9 +368,14 @@ const VideoPlayer = ({ info: original, startAt }: Props) => {
     if (subtitle !== "off") {
       lastSubtitle.current = subtitle;
       setSubtitle("off");
+      rememberSubtitle(null);
     } else {
-      const next = lastSubtitle.current ?? info.subtitles[0]?.id;
-      if (next) setSubtitle(next);
+      const last = info.subtitles.find((s) => s.id === lastSubtitle.current);
+      const next = last ?? info.subtitles[0];
+      if (next) {
+        setSubtitle(next.id);
+        rememberSubtitle(next);
+      }
     }
   }, [subtitle, info.subtitles]);
 
@@ -303,6 +391,55 @@ const VideoPlayer = ({ info: original, startAt }: Props) => {
       { replace: true },
     );
   }, [info.next, info.media, info.info_hash, navigate, report]);
+
+  // Media Session: OS media keys, lock screen controls, and the clock shown in
+  // picture-in-picture. A remuxed stream's own timeline starts at the seek
+  // point, so the real position and duration are reported here.
+  useEffect(() => {
+    const ms = navigator.mediaSession;
+    if (!ms) return;
+    const ep = info.episode;
+    const poster = img(info.media.poster_path, "w342");
+    ms.metadata = new MediaMetadata({
+      title: ep ? (ep.name ?? episodeCode(ep.season_number, ep.episode_numbers)) : info.media.title,
+      artist: ep ? `${info.media.title} · ${episodeCode(ep.season_number, ep.episode_numbers)}` : undefined,
+      artwork: poster ? [{ src: poster, sizes: "342x513", type: "image/jpeg" }] : [],
+    });
+  }, [info.episode, info.media.title, info.media.poster_path]);
+
+  const sessionActions = useRef({ togglePlay, seek, goNext, time: shownTime });
+  sessionActions.current = { togglePlay, seek, goNext, time: shownTime };
+  useEffect(() => {
+    const ms = navigator.mediaSession;
+    if (!ms) return;
+    const set = (action: MediaSessionAction, handler: MediaSessionActionHandler | null) => {
+      try {
+        ms.setActionHandler(action, handler);
+      } catch {
+        /* unsupported action */
+      }
+    };
+    const a = () => sessionActions.current;
+    set("play", () => videoRef.current?.paused && a().togglePlay());
+    set("pause", () => !videoRef.current?.paused && a().togglePlay());
+    set("seekbackward", (d) => a().seek(a().time - (d.seekOffset ?? 10)));
+    set("seekforward", (d) => a().seek(a().time + (d.seekOffset ?? 10)));
+    set("seekto", (d) => d.seekTime !== undefined && a().seek(d.seekTime));
+    set("nexttrack", info.next ? () => a().goNext() : null);
+    return () => {
+      for (const action of ["play", "pause", "seekbackward", "seekforward", "seekto", "nexttrack"] as const) set(action, null);
+    };
+  }, [info.next]);
+
+  useEffect(() => {
+    const ms = navigator.mediaSession;
+    if (!ms?.setPositionState || !duration || !Number.isFinite(duration)) return;
+    try {
+      ms.setPositionState({ duration, position: Math.min(Math.max(0, shownTime), duration), playbackRate: speed });
+    } catch {
+      /* ignore invalid states */
+    }
+  }, [shownTime, duration, speed]);
 
   const goBack = () => {
     report();
@@ -332,7 +469,7 @@ const VideoPlayer = ({ info: original, startAt }: Props) => {
     }
     try {
       const m = await castUrl(shownTime);
-      castOffset.current = mode === "direct" ? 0 : shownTime;
+      castOffset.current = m.offset;
       const files = info.subtitles.filter((s) => !s.embedded);
       await cast.start({
         ...m,
@@ -416,12 +553,10 @@ const VideoPlayer = ({ info: original, startAt }: Props) => {
 
   const onTimeUpdate = () => {
     const v = videoRef.current!;
-    const pos = seekable ? v.currentTime : offset + v.currentTime;
-    setCurrent(pos);
-    if (v.buffered.length) {
-      const end = v.buffered.end(v.buffered.length - 1);
-      setBuffered(seekable ? end : offset + end);
-    }
+    if (!seekable && offset === null) return;
+    const base = seekable ? 0 : (offset ?? 0);
+    setCurrent(base + v.currentTime);
+    if (v.buffered.length) setBuffered(base + v.buffered.end(v.buffered.length - 1));
   };
 
   const onLoadedMetadata = () => {
@@ -452,7 +587,7 @@ const VideoPlayer = ({ info: original, startAt }: Props) => {
 
   const changeAudio = (value: string) => {
     if (seekable) setCompat(true); // switching audio needs the remux path
-    setOffset(current);
+    restartAt(current);
     setAudio(Number(value));
     setBuffering(true);
   };
@@ -460,8 +595,7 @@ const VideoPlayer = ({ info: original, startAt }: Props) => {
   const changeSubtitle = (value: string) => {
     setSubtitle(value);
     if (value !== "off") lastSubtitle.current = value;
-    const lang = info.subtitles.find((s) => s.id === value)?.language ?? "off";
-    storage.set(KEYS.subtitles, value === "off" ? "off" : lang);
+    rememberSubtitle(info.subtitles.find((s) => s.id === value) ?? null);
   };
 
   const changeVersion = (infoHash: string) => {
@@ -614,7 +748,10 @@ const VideoPlayer = ({ info: original, startAt }: Props) => {
         className="size-full"
         onClick={togglePlay}
         onDoubleClick={toggleFullscreen}
-        onPlay={() => setPlaying(true)}
+        onPlay={() => {
+          setPlaying(true);
+          showControls(); // restarts the hide timer, e.g. after autoplaying the next episode
+        }}
         onPause={() => {
           setPlaying(false);
           setControls(true);
@@ -698,7 +835,7 @@ const VideoPlayer = ({ info: original, startAt }: Props) => {
                   onClick={() => {
                     setError(null);
                     setBuffering(true);
-                    setOffset(current);
+                    restartAt(current);
                     setCompat(true);
                   }}
                   className="rounded-md bg-primary px-4 py-2 text-sm font-bold text-on-primary"
@@ -785,7 +922,12 @@ const VideoPlayer = ({ info: original, startAt }: Props) => {
           <span className="w-14 text-sm font-medium text-white/80 tabular-nums">{formatClock(shownTime)}</span>
           <SeekBar current={shownTime} duration={duration} buffered={casting ? 0 : buffered} onSeek={seek} />
           <button
-            onClick={() => setShowRemaining((r) => !r)}
+            onClick={() =>
+              setShowRemaining((r) => {
+                storage.set(KEYS.remaining, String(!r));
+                return !r;
+              })
+            }
             className="w-16 text-right text-sm font-medium text-white/80 tabular-nums hover:text-white"
             title="Toggle remaining time"
           >

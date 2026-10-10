@@ -47,6 +47,7 @@ pub fn router() -> Router<AppState> {
         .route("/play/{file_id}/cast", post(cast_token))
         .route("/stream/{file_id}", get(stream_direct))
         .route("/stream/{file_id}/transcode", get(stream_transcode))
+        .route("/stream/{file_id}/seek-point", get(seek_point))
         .route("/stream/{file_id}/vtt", get(subtitle_vtt))
         .route("/stream/{file_id}/subs/{track}", get(embedded_subtitles))
         .route("/stream/{file_id}/status", get(status))
@@ -322,6 +323,48 @@ async fn stream_transcode(
         .header(header::ACCEPT_RANGES, "none")
         .body(body)
         .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response()))
+}
+
+#[derive(Deserialize)]
+struct SeekQuery {
+    t: f64,
+    #[serde(default)]
+    hevc: bool,
+    #[serde(default)]
+    ac3: bool,
+}
+
+/// Where a remuxed stream asked to start at `t` really starts. Copied video
+/// can only begin on a keyframe, which may be several seconds earlier; the
+/// player uses this as its clock offset so the time and captions line up.
+async fn seek_point(
+    State(state): State<AppState>,
+    access: StreamAccess,
+    Path(file_id): Path<i64>,
+    Query(q): Query<SeekQuery>,
+) -> AppResult<Json<Value>> {
+    let ctx = context(&state, file_id).await?;
+    access.check(&ctx)?;
+    let t = q.t.max(0.0);
+    let probe = stored_probe(&ctx);
+    let ext = parser::extension(&ctx.path).unwrap_or_default();
+    let plan = ffmpeg::plan(&ext, probe.as_ref(), ClientCaps { hevc: q.hevc, ac3: q.ac3, mkv: false }, true);
+    if t <= 0.0 || plan.transcode_video || !state.tools.can_probe() {
+        return Ok(Json(json!({ "start": t })));
+    }
+    let start = match state
+        .tools
+        .keyframe_before(&state.internal_stream_url(file_id, StreamPurpose::Probe), t)
+        .await
+    {
+        Ok(Some(k)) => k,
+        Ok(None) => t,
+        Err(e) => {
+            tracing::debug!(file_id, error = %e, "keyframe lookup failed");
+            t
+        }
+    };
+    Ok(Json(json!({ "start": start })))
 }
 
 async fn subtitle_vtt(

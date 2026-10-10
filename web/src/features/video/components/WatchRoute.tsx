@@ -1,8 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
+import { useRef } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import Spinner from "@/features/ui/components/Spinner";
 import { api, errorMessage, qs } from "@/lib/api";
 import { kindFromSegment, parseEpisodeSlug, tmdbIdFromSlug } from "@/lib/urls";
+import type { PlayInfo } from "@/lib/types";
 import { usePlayInfo } from "../hooks/usePlayback";
 import VideoPlayer from "./VideoPlayer";
 
@@ -55,6 +57,12 @@ const WatchRoute = () => {
   const fileId = resolved.data?.file_id ?? null;
   const play = usePlayInfo(fileId);
 
+  // While the next episode loads, keep the current player on screen so the
+  // same video element (and fullscreen or picture-in-picture) carries over.
+  const last = useRef<PlayInfo | null>(null);
+  if (play.data) last.current = play.data;
+  const shown = play.data ?? last.current;
+
   const back = () => (window.history.length > 1 ? navigate(-1) : navigate("/"));
 
   if (!kind || tmdbId === null || (params.episode && !episode)) {
@@ -62,8 +70,8 @@ const WatchRoute = () => {
   }
   if (resolved.error) return <Message title="Can't play this" body={errorMessage(resolved.error)} onBack={back} />;
   if (play.error) return <Message title="Can't play this" body={errorMessage(play.error)} onBack={back} />;
-  if (!play.data) return <Loading />;
-  return <VideoPlayer key={play.data.session_id} info={play.data} startAt={t} />;
+  if (!shown) return <Loading />;
+  return <VideoPlayer info={shown} startAt={t} />;
 };
 
 export default WatchRoute;
