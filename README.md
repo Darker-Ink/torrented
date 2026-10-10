@@ -41,10 +41,33 @@ It's one binary. Run it, open the browser, finish the setup wizard.
 
 ## Running
 
+### Docker
+
+```sh
+curl -O https://raw.githubusercontent.com/Darker-Ink/torrented/master/docker-compose.yml
+docker compose up -d
+# → http://localhost:8080
+```
+
+The image (`ghcr.io/darker-ink/torrented`, amd64 + arm64) includes ffmpeg and
+keeps everything in the `torrented-data` volume. Forward port `6881` (TCP and
+UDP) on your router for better speeds. See `docker-compose.yml` for the
+available options; to build the image yourself use `docker compose build` with
+the `build: .` line uncommented, or `docker build -t torrented .`.
+
+### Binary
+
+Grab a build for your platform from the
+[releases](https://github.com/Darker-Ink/torrented/releases) (or the artifacts
+of the latest [Build workflow](https://github.com/Darker-Ink/torrented/actions/workflows/build.yml)
+run), then:
+
 ```sh
 ./torrented
 # → http://localhost:8080
 ```
+
+Linux builds are statically linked and run on any distro.
 
 Data lives in `./data` by default:
 
@@ -89,6 +112,11 @@ cargo build --release
 `target/release/torrented` is all you need to ship. Set
 `TORRENTED_SKIP_WEB_BUILD=1` to skip the frontend build.
 
+CI (`.github/workflows/build.yml`) builds Linux (static musl, x86_64/arm64),
+macOS (arm64/x86_64) and Windows binaries on every push and uploads them as
+workflow artifacts. Pushes to `master` also publish the Docker image, and
+`v*` tags create a GitHub release with the binaries attached.
+
 ### Development
 
 ```sh
@@ -112,4 +140,5 @@ web/               React app (Vite, Tailwind, Headless UI)
   src/pages        file-based routes (vite-plugin-pages)
   src/features/*/components
 vendor/            patched librqbit-dualstack-sockets (IPv4 fallback)
+docker/            Dockerfile used by CI to package prebuilt binaries
 ```
