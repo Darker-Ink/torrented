@@ -98,6 +98,15 @@ pub const DEFS: &[SettingDef] = &[
         group: "Streaming",
     },
     SettingDef {
+        key: "readahead_mb",
+        label: "Read-ahead buffer (MB)",
+        description: "How far past the playhead pieces are fetched. Nothing beyond this is downloaded, not even the rest of the episode.",
+        kind: SettingKind::Number,
+        default: "256",
+        options: &[],
+        group: "Streaming",
+    },
+    SettingDef {
         key: "idle_timeout_minutes",
         label: "Idle timeout (minutes)",
         description: "Stop a torrent and drop its cached pieces after nobody has streamed it for this long.",
@@ -255,6 +264,11 @@ impl Settings {
     pub async fn cache_max_bytes(&self) -> u64 {
         let gb: f64 = self.get("cache_max_gb").await.parse().unwrap_or(20.0);
         (gb.max(0.5) * 1024.0 * 1024.0 * 1024.0) as u64
+    }
+
+    pub async fn readahead_bytes(&self) -> u64 {
+        let mb: f64 = self.get("readahead_mb").await.parse().unwrap_or(256.0);
+        (mb.clamp(8.0, 16_384.0) * 1024.0 * 1024.0) as u64
     }
 
     pub async fn idle_timeout(&self) -> std::time::Duration {

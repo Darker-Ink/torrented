@@ -19,7 +19,9 @@ It's one binary. Run it, open the browser, finish the setup wizard.
 ## Features
 
 - **Streaming from the swarm** – seekable HTTP streams backed by
-  [librqbit](https://github.com/ikatson/rqbit), with an on-disk cache that is
+  [librqbit](https://github.com/ikatson/rqbit). Only a read-ahead window past
+  the playhead is ever requested from peers (256 MB by default), so watching
+  episode 1 of a season pack never downloads episode 6. The on-disk cache is
   size-limited, evicted when idle and wiped on start.
 - **Sonarr/Radarr-style scanning** – torrents are read in list-only mode, every
   file is classified and parsed (`S01E01E02`, `1x05`, season packs, season
@@ -139,6 +141,7 @@ server/            Rust backend (axum, librqbit, sqlx/SQLite)
 web/               React app (Vite, Tailwind, Headless UI)
   src/pages        file-based routes (vite-plugin-pages)
   src/features/*/components
-vendor/            patched librqbit-dualstack-sockets (IPv4 fallback)
+vendor/            patched librqbit (stream-only mode) and
+                   librqbit-dualstack-sockets (IPv4 fallback)
 docker/            Dockerfile used by CI to package prebuilt binaries
 ```

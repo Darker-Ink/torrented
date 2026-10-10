@@ -512,7 +512,7 @@ pub async fn probe_file(state: &AppState, file_id: i64) -> AppResult<Option<Stri
         .await?;
     let probe = state
         .tools
-        .probe(&state.internal_stream_url(file_id))
+        .probe(&state.internal_stream_url(file_id, crate::state::StreamPurpose::Probe))
         .await
         .map_err(|e| AppError::Upstream(format!("{e:#}")))?;
     store_probe(&state.media, file_id, &probe).await?;

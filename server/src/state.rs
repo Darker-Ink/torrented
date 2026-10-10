@@ -40,7 +40,7 @@ impl Deref for AppState {
 
 impl Inner {
     /// URL that local helpers (ffmpeg/ffprobe) use to read a torrent file.
-    pub fn internal_stream_url(&self, file_id: i64) -> String {
+    pub fn internal_stream_url(&self, file_id: i64, purpose: StreamPurpose) -> String {
         let addr = self.config.listen;
         let host = match addr.ip() {
             ip if ip.is_unspecified() && ip.is_ipv4() => "127.0.0.1".to_string(),
@@ -49,9 +49,32 @@ impl Inner {
             ip => ip.to_string(),
         };
         format!(
-            "http://{host}:{}/api/internal/files/{file_id}/raw?key={}",
+            "http://{host}:{}/api/internal/files/{file_id}/raw?key={}&purpose={}",
             addr.port(),
-            self.internal_key
+            self.internal_key,
+            purpose.as_str()
         )
     }
 }
+
+/// Why a helper process is reading a file; decides the read-ahead window.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum StreamPurpose {
+    /// ffprobe reading headers: only fetch what it touches.
+    Probe,
+    /// ffmpeg remuxing/transcoding for a viewer.
+    Playback,
+}
+
+impl StreamPurpose {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Probe => "probe",
+            Self::Playback => "playback",
+        }
+    }
+}
+
+/// Read-ahead used while scanning files: enough for container headers.
+pub const PROBE_READAHEAD: u64 = 4 * 1024 * 1024;

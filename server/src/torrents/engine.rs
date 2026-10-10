@@ -150,6 +150,8 @@ impl TorrentEngine {
             client_name_and_version: Some(format!("torrented/{}", env!("CARGO_PKG_VERSION"))),
             ..Default::default()
         };
+        // Never download more than active streams are about to read.
+        librqbit::set_stream_only(true);
         let session = Session::new_with_opts(cache_dir.clone(), opts)
             .await
             .context("starting torrent session")?;
@@ -347,10 +349,9 @@ impl TorrentEngine {
         Ok(lease)
     }
 
-    pub async fn open_stream(
-        &self,
-        lease: &Lease,
-    ) -> anyhow::Result<impl tokio::io::AsyncRead + tokio::io::AsyncSeek + Unpin + Send + 'static> {
+    /// Open a reader for the leased file. Only `readahead` bytes past the
+    /// read position are ever requested from peers.
+    pub async fn open_stream(&self, lease: &Lease, readahead: u64) -> anyhow::Result<librqbit::FileStream> {
         let handle = self
             .entries
             .lock()
@@ -358,7 +359,9 @@ impl TorrentEngine {
             .get(&lease.info_hash)
             .map(|e| e.handle.clone())
             .context("torrent is no longer active")?;
-        handle.stream(lease.file_index).await
+        let stream = handle.stream(lease.file_index).await?;
+        stream.set_readahead(readahead);
+        Ok(stream)
     }
 
     fn release(&self, info_hash: &str, file_index: usize) {

@@ -22,7 +22,7 @@ use crate::{
     auth::{ClientInfo, CurrentUser, User, perm},
     error::{AppError, AppResult},
     library::files::{self, FileContext},
-    state::AppState,
+    state::{AppState, PROBE_READAHEAD, StreamPurpose},
     streaming::{
         self, CountingStream,
         ffmpeg::{self, ClientCaps, PlaybackMode, ProbeResult, TranscodeOptions},
@@ -80,6 +80,7 @@ async fn serve_file(
     ctx: &FileContext,
     headers: &HeaderMap,
     session_id: Option<i64>,
+    readahead: u64,
 ) -> AppResult<Response> {
     let metainfo = ctx
         .metainfo
@@ -89,7 +90,7 @@ async fn serve_file(
         .engine
         .acquire(&ctx.info_hash, Bytes::from(metainfo), ctx.file_index as usize)
         .await?;
-    let reader = state.engine.open_stream(&lease).await?;
+    let reader = state.engine.open_stream(&lease, readahead).await?;
     let counter = Arc::new(AtomicU64::new(0));
     let guard = StreamGuard {
         state: state.clone(),
@@ -135,12 +136,14 @@ async fn stream_direct(
     user.require(perm::STREAM)?;
     let ctx = context(&state, file_id).await?;
     let sid = own_session(&state, &user, q.sid).await?;
-    serve_file(&state, &ctx, &headers, sid).await
+    let readahead = state.settings.readahead_bytes().await;
+    serve_file(&state, &ctx, &headers, sid, readahead).await
 }
 
 #[derive(Deserialize)]
 struct InternalQuery {
     key: String,
+    purpose: Option<StreamPurpose>,
 }
 
 /// Raw file access for local ffmpeg/ffprobe processes.
@@ -154,7 +157,11 @@ async fn internal_raw(
         return Err(AppError::forbidden("invalid key"));
     }
     let ctx = context(&state, file_id).await?;
-    serve_file(&state, &ctx, &headers, None).await
+    let readahead = match q.purpose {
+        Some(StreamPurpose::Probe) => PROBE_READAHEAD,
+        _ => state.settings.readahead_bytes().await,
+    };
+    serve_file(&state, &ctx, &headers, None, readahead).await
 }
 
 #[derive(Deserialize)]
@@ -209,7 +216,9 @@ async fn stream_transcode(
         transcode_video: plan.transcode_video,
         copy_audio,
     };
-    let mut child = state.tools.spawn_stream(&state.internal_stream_url(file_id), &opts)?;
+    let mut child = state
+        .tools
+        .spawn_stream(&state.internal_stream_url(file_id, StreamPurpose::Playback), &opts)?;
     let stdout = child.stdout.take().ok_or_else(|| anyhow::anyhow!("ffmpeg has no stdout"))?;
     let counter = Arc::new(AtomicU64::new(0));
     let guard = StreamGuard {
@@ -254,7 +263,7 @@ async fn subtitle_vtt(
         .engine
         .acquire(&ctx.info_hash, Bytes::from(metainfo), ctx.file_index as usize)
         .await?;
-    let mut reader = state.engine.open_stream(&lease).await?;
+    let mut reader = state.engine.open_stream(&lease, PROBE_READAHEAD).await?;
     let mut buf = Vec::with_capacity(ctx.size as usize);
     tokio::time::timeout(std::time::Duration::from_secs(90), reader.read_to_end(&mut buf))
         .await
