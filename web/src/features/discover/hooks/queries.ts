@@ -61,7 +61,14 @@ export const useAddToLibrary = () => {
 export const useCreateRequest = () => {
   const invalidate = useInvalidateDiscovery();
   return useMutation({
-    mutationFn: (body: { kind: MediaKind; tmdb_id: number; seasons?: number[]; note?: string }) =>
+    mutationFn: (body: {
+      kind: MediaKind;
+      tmdb_id: number;
+      seasons?: number[];
+      note?: string;
+      torrent?: string;
+      torrent_file?: string;
+    }) =>
       api.post<{ id: number; status: string; media_id: number | null }>("/requests", body),
     onSuccess: invalidate,
   });

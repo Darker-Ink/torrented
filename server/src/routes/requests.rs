@@ -1,8 +1,10 @@
 use axum::{
     Json, Router,
     extract::{Path, Query, State},
-    routing::{get, patch},
+    routing::{get, patch, post},
 };
+use base64::Engine as _;
+use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -16,12 +18,14 @@ use crate::{
     library,
     metadata::MediaKind,
     state::AppState,
+    torrents::review,
 };
 
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/requests", get(list).post(create))
         .route("/requests/{id}", patch(update).delete(remove))
+        .route("/requests/{id}/review", post(recheck))
 }
 
 #[derive(Serialize, sqlx::FromRow)]
@@ -41,13 +45,21 @@ struct RequestRow {
     status: String,
     response: Option<String>,
     handled_by_name: Option<String>,
+    has_torrent: bool,
+    torrent_name: Option<String>,
+    torrent_info_hash: Option<String>,
+    torrent_attached: bool,
+    review_status: Option<String>,
+    review: Option<SqlJson<Value>>,
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
 }
 
 const SELECT: &str = "SELECT r.id, r.user_id, COALESCE(u.display_name, u.username) AS requested_by, r.kind,
         r.tmdb_id, r.title, r.year, r.poster_path, r.backdrop_path, r.overview, r.seasons, r.note, r.status,
-        r.response, COALESCE(h.display_name, h.username) AS handled_by_name, r.created_at, r.updated_at
+        r.response, COALESCE(h.display_name, h.username) AS handled_by_name,
+        r.torrent_source IS NOT NULL AS has_torrent, r.torrent_name, r.torrent_info_hash, r.torrent_attached,
+        r.review_status, r.review, r.created_at, r.updated_at
     FROM requests r JOIN users u ON u.id = r.user_id LEFT JOIN users h ON h.id = r.handled_by";
 
 #[derive(Deserialize)]
@@ -92,6 +104,10 @@ struct CreateBody {
     tmdb_id: i64,
     seasons: Option<Vec<i64>>,
     note: Option<String>,
+    /// Magnet link, info hash or link to a .torrent file.
+    torrent: Option<String>,
+    /// A .torrent file, base64 encoded.
+    torrent_file: Option<String>,
 }
 
 async fn create(
@@ -132,13 +148,34 @@ async fn create(
         .await
         .map_err(|e| AppError::Upstream(format!("{e:#}")))?;
 
+    // A suggested torrent is validated (and downloaded, for links) up front
+    // so mistakes show up in the dialog rather than in the review.
+    let upload = match body.torrent_file.as_deref().filter(|f| !f.is_empty()) {
+        Some(b64) => Some(Bytes::from(
+            base64::engine::general_purpose::STANDARD
+                .decode(b64.trim())
+                .map_err(|_| AppError::bad_request("the .torrent file couldn't be read"))?,
+        )),
+        None => None,
+    };
+    let source = match (&upload, body.torrent.as_deref().map(str::trim).filter(|t| !t.is_empty())) {
+        (Some(_), _) => Some("upload".to_string()),
+        (None, Some(t)) => Some(t.to_string()),
+        (None, None) => None,
+    };
+    let metainfo = match &source {
+        Some(s) => review::prepare(s, upload).await?,
+        None => None,
+    };
+
     let auto = user.can(perm::AUTO_APPROVE);
     let now = Utc::now();
     let note = body.note.map(|n| n.trim().chars().take(500).collect::<String>()).filter(|n| !n.is_empty());
     let id: i64 = sqlx::query_scalar(
         "INSERT INTO requests (user_id, kind, tmdb_id, title, year, poster_path, backdrop_path, overview,
-            seasons, note, status, handled_by, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
+            seasons, note, status, handled_by, torrent_source, torrent_metainfo, review_status,
+            created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
     )
     .bind(user.id)
     .bind(kind.as_str())
@@ -152,6 +189,9 @@ async fn create(
     .bind(note)
     .bind(if auto { "approved" } else { "pending" })
     .bind(auto.then_some(user.id))
+    .bind(&source)
+    .bind(metainfo.as_deref())
+    .bind(source.as_ref().map(|_| "checking"))
     .bind(now)
     .bind(now)
     .fetch_one(&state.main)
@@ -168,9 +208,12 @@ async fn create(
         &client,
         "request.create",
         Some(details.title.clone()),
-        Some(json!({ "kind": kind, "tmdb_id": body.tmdb_id, "auto_approved": auto })),
+        Some(json!({ "kind": kind, "tmdb_id": body.tmdb_id, "auto_approved": auto, "torrent": source.is_some() })),
     )
     .await;
+    if source.is_some() {
+        review::spawn(&state, id);
+    }
     Ok(Json(json!({ "id": id, "status": if auto { "approved" } else { "pending" }, "media_id": media_id })))
 }
 
@@ -178,6 +221,9 @@ async fn create(
 struct UpdateBody {
     status: String,
     response: Option<String>,
+    /// Attach the suggested torrent on approval. Defaults to yes unless the
+    /// review found a problem.
+    attach_torrent: Option<bool>,
 }
 
 async fn update(
@@ -191,8 +237,8 @@ async fn update(
     if !["approved", "declined", "pending"].contains(&body.status.as_str()) {
         bail_bad_request!("status must be approved, declined or pending");
     }
-    let (kind, tmdb_id, title): (String, i64, String) =
-        sqlx::query_as("SELECT kind, tmdb_id, title FROM requests WHERE id = ?")
+    let (kind, tmdb_id, title, review_status): (String, i64, String, Option<String>) =
+        sqlx::query_as("SELECT kind, tmdb_id, title, review_status FROM requests WHERE id = ?")
             .bind(id)
             .fetch_optional(&state.main)
             .await?
@@ -212,6 +258,17 @@ async fn update(
         .bind(id)
         .execute(&state.main)
         .await?;
+
+    let mut torrent_error = None;
+    let attach = body
+        .attach_torrent
+        .unwrap_or(matches!(review_status.as_deref(), Some("pass" | "warn")));
+    if body.status == "approved"
+        && attach
+        && let Err(e) = review::attach(&state, id, user.id).await
+    {
+        torrent_error = Some(e.to_string());
+    }
     audit::log(
         &state,
         Some(&user),
@@ -221,7 +278,37 @@ async fn update(
         Some(json!({ "request_id": id })),
     )
     .await;
-    Ok(Json(json!({ "ok": true, "media_id": media_id })))
+    Ok(Json(json!({ "ok": true, "media_id": media_id, "torrent_error": torrent_error })))
+}
+
+/// Run the torrent review again, e.g. once more seeders turn up.
+async fn recheck(
+    State(state): State<AppState>,
+    CurrentUser(user): CurrentUser,
+    Path(id): Path<i64>,
+) -> AppResult<Json<Value>> {
+    let (owner, has_torrent, attached): (i64, bool, bool) = sqlx::query_as(
+        "SELECT user_id, torrent_source IS NOT NULL, torrent_attached FROM requests WHERE id = ?",
+    )
+    .bind(id)
+    .fetch_optional(&state.main)
+    .await?
+    .ok_or_else(|| AppError::not_found("request not found"))?;
+    if owner != user.id && !user.can(perm::MANAGE_REQUESTS) {
+        return Err(AppError::forbidden("you can't review this request"));
+    }
+    if !has_torrent {
+        bail_bad_request!("this request has no torrent");
+    }
+    if attached {
+        bail_bad_request!("the torrent is already attached");
+    }
+    sqlx::query("UPDATE requests SET review_status = 'checking' WHERE id = ?")
+        .bind(id)
+        .execute(&state.main)
+        .await?;
+    review::spawn(&state, id);
+    Ok(Json(json!({ "ok": true })))
 }
 
 async fn remove(

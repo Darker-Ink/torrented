@@ -12,8 +12,9 @@ import { timeAgo } from "@/lib/format";
 import { img } from "@/lib/images";
 import { can, PERM } from "@/lib/permissions";
 import type { MediaRequest, RequestStatus } from "@/lib/types";
-import { useRequestActions } from "../hooks/queries";
 import { titleUrl } from "@/lib/urls";
+import { useRequestActions } from "../hooks/queries";
+import TorrentReview from "./TorrentReview";
 
 const statusTone: Record<RequestStatus, "warning" | "primary" | "danger" | "success"> = {
   pending: "warning",
@@ -31,18 +32,35 @@ const statusLabel: Record<RequestStatus, string> = {
 
 const RequestCard = ({ request }: { request: MediaRequest }) => {
   const user = useUser();
-  const { update, remove } = useRequestActions();
+  const { update, remove, recheck } = useRequestActions();
   const [declining, setDeclining] = useState(false);
   const [response, setResponse] = useState("");
   const manager = can(user, PERM.MANAGE_REQUESTS);
   const own = request.user_id === user?.id;
   const link = titleUrl(request);
 
-  const act = async (status: RequestStatus, resp?: string) => {
+  const act = async (status: RequestStatus, opts: { response?: string; attach?: boolean } = {}) => {
     try {
-      await update.mutateAsync({ id: request.id, status, response: resp });
-      toast.success(status === "approved" ? `${request.title} added to the library` : "Request updated");
+      const res = await update.mutateAsync({
+        id: request.id,
+        status,
+        response: opts.response,
+        attach_torrent: opts.attach,
+      });
+      if (res.torrent_error) toast.error(`Approved, but the torrent wasn't added: ${res.torrent_error}`);
+      else toast.success(status === "approved" ? `${request.title} added to the library` : "Request updated");
       setDeclining(false);
+    } catch (err) {
+      toast.error(errorMessage(err));
+    }
+  };
+
+  // A torrent that failed its review isn't attached unless staff insist.
+  const badTorrent =
+    request.has_torrent && !request.torrent_attached && (request.review_status === "fail" || request.review_status === "error");
+  const recheckRequest = async () => {
+    try {
+      await recheck.mutateAsync(request.id);
     } catch (err) {
       toast.error(errorMessage(err));
     }
@@ -81,6 +99,13 @@ const RequestCard = ({ request }: { request: MediaRequest }) => {
           <p className="text-xs text-muted">Seasons: {request.seasons.join(", ")}</p>
         )}
         {request.note && <p className="text-sm text-fg/80">“{request.note}”</p>}
+        {request.has_torrent && (
+          <TorrentReview
+            request={request}
+            onRecheck={manager || own ? recheckRequest : undefined}
+            rechecking={recheck.isPending}
+          />
+        )}
         {request.response && (
           <p className="text-xs text-muted">
             {request.handled_by_name ?? "Staff"}: {request.response}
@@ -90,8 +115,13 @@ const RequestCard = ({ request }: { request: MediaRequest }) => {
           {manager && request.status === "pending" && (
             <>
               <Button size="sm" variant="primary" onClick={() => act("approved")} loading={update.isPending}>
-                <CheckIcon className="size-4" /> Approve
+                <CheckIcon className="size-4" /> {badTorrent ? "Approve without torrent" : "Approve"}
               </Button>
+              {badTorrent && (
+                <Button size="sm" onClick={() => act("approved", { attach: true })} disabled={update.isPending}>
+                  Approve with torrent
+                </Button>
+              )}
               <Button size="sm" variant="danger" onClick={() => setDeclining(true)}>
                 <XMarkIcon className="size-4" /> Decline
               </Button>
@@ -121,7 +151,7 @@ const RequestCard = ({ request }: { request: MediaRequest }) => {
             <Button variant="ghost" onClick={() => setDeclining(false)}>
               Cancel
             </Button>
-            <Button variant="danger" onClick={() => act("declined", response)} loading={update.isPending}>
+            <Button variant="danger" onClick={() => act("declined", { response })} loading={update.isPending}>
               Decline
             </Button>
           </>

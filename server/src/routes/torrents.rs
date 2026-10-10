@@ -150,18 +150,8 @@ async fn add_json(
     Json(body): Json<AddBody>,
 ) -> AppResult<Json<Value>> {
     user.require(perm::ADD_TORRENTS)?;
-    let source = body.source.trim().to_string();
-    if source.is_empty() {
-        bail_bad_request!("paste a magnet link or a link to a .torrent file");
-    }
-    let input = if source.starts_with("magnet:") {
-        AddInput::Magnet(source)
-    } else if source.len() == 40 && source.chars().all(|c| c.is_ascii_hexdigit()) {
-        AddInput::Magnet(format!("magnet:?xt=urn:btih:{source}"))
-    } else {
-        AddInput::Url(source)
-    };
-    let outcome = scan::add_torrent(&state, id, input, &user).await?;
+    let input = scan::parse_source(&body.source)?;
+    let outcome = scan::add_torrent(&state, id, input, user.id).await?;
     audit::log(
         &state,
         Some(&user),
@@ -193,7 +183,7 @@ async fn add_upload(
         }
     }
     let data = data.ok_or_else(|| AppError::bad_request("no torrent file uploaded"))?;
-    let outcome = scan::add_torrent(&state, id, AddInput::File(data), &user).await?;
+    let outcome = scan::add_torrent(&state, id, AddInput::File(data), user.id).await?;
     audit::log(
         &state,
         Some(&user),

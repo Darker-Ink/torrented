@@ -93,6 +93,7 @@ async fn main() -> anyhow::Result<()> {
         });
     }
     torrents::scan::resume_jobs(&state).await;
+    torrents::review::resume(&state).await;
 
     let app = routes::router(state.clone());
     let listener = tokio::net::TcpListener::bind(config.listen)

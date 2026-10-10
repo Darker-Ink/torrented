@@ -23,7 +23,6 @@ use super::{
     parser::{self, FileKind},
 };
 use crate::{
-    auth::User,
     error::{AppError, AppResult},
     library,
     metadata::MediaKind,
@@ -38,6 +37,41 @@ pub enum AddInput {
     Magnet(String),
     File(Bytes),
     Url(String),
+    /// Metadata that was already fetched (e.g. while reviewing a request),
+    /// plus the magnet it came from so its trackers aren't lost.
+    Metainfo { bytes: Bytes, magnet: Option<String> },
+}
+
+/// Turn what someone pasted (magnet, bare info hash or link) into an input.
+pub fn parse_source(source: &str) -> AppResult<AddInput> {
+    let source = source.trim();
+    if source.is_empty() {
+        return Err(AppError::bad_request("paste a magnet link or a link to a .torrent file"));
+    }
+    Ok(if source.starts_with("magnet:") {
+        AddInput::Magnet(source.to_string())
+    } else if source.len() == 40 && source.chars().all(|c| c.is_ascii_hexdigit()) {
+        AddInput::Magnet(format!("magnet:?xt=urn:btih:{source}"))
+    } else {
+        AddInput::Url(source.to_string())
+    })
+}
+
+/// Info hash of a magnet link, validating it on the way.
+pub fn magnet_info_hash(m: &str) -> AppResult<String> {
+    super::engine::validate_magnet(m).map_err(|e| AppError::bad_request(e.to_string()))?;
+    let parsed =
+        librqbit::Magnet::parse(m).map_err(|e| AppError::bad_request(format!("invalid magnet link: {e}")))?;
+    Ok(parsed
+        .as_id20()
+        .ok_or_else(|| AppError::bad_request("only BitTorrent v1 magnet links are supported"))?
+        .as_string())
+}
+
+pub fn magnet_trackers(m: &str) -> Vec<String> {
+    url::Url::parse(m)
+        .map(|u| u.query_pairs().filter(|(k, _)| k == "tr").map(|(_, v)| v.into_owned()).collect())
+        .unwrap_or_default()
 }
 
 #[derive(Debug, Serialize)]
@@ -47,7 +81,7 @@ pub struct AddOutcome {
     pub status: String,
 }
 
-fn magnet_for(info_hash: &str, name: &str, trackers: &[String]) -> String {
+pub fn magnet_for(info_hash: &str, name: &str, trackers: &[String]) -> String {
     let mut m = format!(
         "magnet:?xt=urn:btih:{info_hash}&dn={}",
         urlencoding::encode(name)
@@ -59,7 +93,7 @@ fn magnet_for(info_hash: &str, name: &str, trackers: &[String]) -> String {
     m
 }
 
-async fn fetch_torrent_url(url: &str) -> AppResult<Bytes> {
+pub async fn fetch_torrent_url(url: &str) -> AppResult<Bytes> {
     let parsed = url::Url::parse(url).map_err(|_| AppError::bad_request("invalid URL"))?;
     if !matches!(parsed.scheme(), "http" | "https") {
         return Err(AppError::bad_request("only http(s) URLs are supported"));
@@ -92,7 +126,7 @@ pub async fn add_torrent(
     state: &AppState,
     media_id: i64,
     input: AddInput,
-    user: &User,
+    user_id: i64,
 ) -> AppResult<AddOutcome> {
     let media = library::get_media(&state.media, media_id).await?;
 
@@ -104,14 +138,28 @@ pub async fn add_torrent(
 
     let (info_hash, name, magnet, resolved) = match input {
         AddInput::Magnet(m) => {
-            super::engine::validate_magnet(&m).map_err(|e| AppError::bad_request(e.to_string()))?;
-            let parsed = librqbit::Magnet::parse(&m)
-                .map_err(|e| AppError::bad_request(format!("invalid magnet link: {e}")))?;
-            let hash = parsed
-                .as_id20()
-                .ok_or_else(|| AppError::bad_request("only BitTorrent v1 magnet links are supported"))?
-                .as_string();
-            (hash, parsed.name.clone(), m, None)
+            let hash = magnet_info_hash(&m)?;
+            let name = librqbit::Magnet::parse(&m).ok().and_then(|p| p.name);
+            (hash, name, m, None)
+        }
+        AddInput::Metainfo { bytes, magnet } => {
+            let mut resolved = state
+                .engine
+                .resolve(TorrentSource::File(bytes))
+                .await
+                .map_err(|e| AppError::bad_request(format!("invalid torrent file: {e:#}")))?;
+            let magnet = match magnet.filter(|m| m.starts_with("magnet:")) {
+                Some(m) => {
+                    for t in magnet_trackers(&m) {
+                        if !resolved.trackers.contains(&t) {
+                            resolved.trackers.push(t);
+                        }
+                    }
+                    m
+                }
+                None => magnet_for(&resolved.info_hash, &resolved.name, &resolved.trackers),
+            };
+            (resolved.info_hash.clone(), Some(resolved.name.clone()), magnet, Some(resolved))
         }
         AddInput::File(bytes) => {
             let resolved = state
@@ -164,7 +212,7 @@ pub async fn add_torrent(
     .bind(media.tmdb_id)
     .bind(&name)
     .bind(&magnet)
-    .bind(user.id)
+    .bind(user_id)
     .bind(now)
     .bind(now)
     .execute(&state.main)

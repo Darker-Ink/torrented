@@ -223,9 +223,34 @@ export type MediaRequest = {
   status: RequestStatus;
   response: string | null;
   handled_by_name: string | null;
+  has_torrent: boolean;
+  torrent_name: string | null;
+  torrent_info_hash: string | null;
+  torrent_attached: boolean;
+  review_status: ReviewStatus | null;
+  review: TorrentReview | { error: string; checked_at: string } | null;
   created_at: string;
   updated_at: string;
   media_id: number | null;
+};
+
+export type ReviewVerdict = "pass" | "warn" | "fail";
+export type ReviewStatus = "checking" | ReviewVerdict | "error";
+
+export type ReviewCheck = { key: string; label: string; status: ReviewVerdict; detail: string };
+
+export type TorrentReview = {
+  verdict: ReviewVerdict;
+  checks: ReviewCheck[];
+  size: number;
+  file_count: number;
+  video_count: number;
+  resolution: string | null;
+  source: string | null;
+  video_codec: string | null;
+  seeders: number | null;
+  leechers: number | null;
+  checked_at: string;
 };
 
 export type TorrentFile = {

@@ -4,7 +4,7 @@
 
 <h1 align="center">torrented</h1>
 
-<p align="center">A self-hosted, Netflix-style library for your own torrents. Stream straight from the swarm — nothing is downloaded up front.</p>
+<p align="center">A self-hosted, Netflix-style library for your own torrents. Stream straight from the swarm, nothing is downloaded up front.</p>
 
 ---
 
@@ -30,11 +30,15 @@ It's one binary. Run it, open the browser, finish the setup wizard.
   container headers, to confirm codecs, resolution and duration. Anything that
   looks off is flagged, and mappings can be fixed by hand.
 - **Plays in the browser** – browser-friendly files play directly; MKV, AC-3,
-  HEVC and friends are remuxed or transcoded on the fly with ffmpeg. SRT/ASS
-  subtitles inside torrents are converted to WebVTT.
+  HEVC and friends are remuxed or transcoded on the fly with ffmpeg. Subtitle
+  files and subtitle tracks inside MKVs are shown as captions. The player has
+  a settings menu, a right-click menu, picture-in-picture and Google Cast.
 - **Users, permissions, invites and requests** – fine-grained permissions,
   invite links, a request queue with approvals, watch progress, "continue
   watching", My List, an audit log and playback history.
+- **Requests can come with a torrent** – a suggested torrent is checked
+  automatically (right title, the requested seasons, real video files,
+  quality, seeders from a tracker scrape) and attached when approved.
 - **Two databases** – `main.db` holds instance data (accounts, progress, logs,
   settings). `media.db` holds only the library (titles, episodes, torrents and
   what's in them), so it can be exported and imported into another server.
