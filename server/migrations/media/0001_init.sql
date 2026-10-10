@@ -1,6 +1,7 @@
 -- Library database. Self-contained so it can be exported and shared between
--- instances; nothing in here references main.db row ids except the
--- informational `added_by` columns.
+-- instances: it only holds metadata about titles, the torrents attached to
+-- them and what is inside those torrents. Anything specific to one instance
+-- (who added what, scan jobs, errors, users) lives in main.db.
 
 INSERT INTO schema_meta (key, value) VALUES
     ('library_id', lower(hex(randomblob(16)))),
@@ -33,7 +34,6 @@ CREATE TABLE media (
     backdrop_path         TEXT,
     logo_path             TEXT,
     trailer_key           TEXT,
-    added_by              INTEGER,
     added_at              TEXT    NOT NULL,
     updated_at            TEXT    NOT NULL,
     metadata_refreshed_at TEXT,
@@ -74,27 +74,21 @@ CREATE TABLE episodes (
 CREATE TABLE torrents (
     id            INTEGER PRIMARY KEY,
     info_hash     TEXT    NOT NULL UNIQUE,
-    media_id      INTEGER REFERENCES media (id) ON DELETE CASCADE,
+    media_id      INTEGER NOT NULL REFERENCES media (id) ON DELETE CASCADE,
     name          TEXT    NOT NULL,
-    magnet        TEXT,
-    torrent_file  BLOB,
+    magnet        TEXT    NOT NULL,
+    metainfo      BLOB, -- the .torrent file, so peers aren't needed to read metadata
     total_size    INTEGER NOT NULL DEFAULT 0,
     piece_length  INTEGER,
     file_count    INTEGER NOT NULL DEFAULT 0,
     trackers      TEXT    NOT NULL DEFAULT '[]',
-    status        TEXT    NOT NULL DEFAULT 'pending'
-                  CHECK (status IN ('pending', 'scanning', 'ready', 'error')),
-    error         TEXT,
     resolution    TEXT,
     source        TEXT,
     video_codec   TEXT,
     audio         TEXT,
     hdr           TEXT,
     release_group TEXT,
-    added_by      INTEGER,
-    added_by_name TEXT,
-    added_at      TEXT    NOT NULL,
-    scanned_at    TEXT
+    added_at      TEXT    NOT NULL
 );
 CREATE INDEX torrents_media ON torrents (media_id);
 
@@ -117,8 +111,7 @@ CREATE TABLE torrent_files (
     video_codec     TEXT,
     audio_codec     TEXT,
     duration        REAL,
-    probe           TEXT, -- JSON summary of streams
-    probe_error     TEXT,
+    probe           TEXT, -- JSON summary of audio/subtitle streams
     probed_at       TEXT,
     UNIQUE (torrent_id, file_index)
 );

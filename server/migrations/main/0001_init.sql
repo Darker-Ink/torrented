@@ -88,6 +88,25 @@ CREATE TABLE watchlist (
     PRIMARY KEY (user_id, kind, tmdb_id)
 );
 
+-- Background work on torrents (metadata resolution, probing) and who added
+-- them. Kept here rather than in media.db because it is instance specific.
+CREATE TABLE torrent_jobs (
+    id         INTEGER PRIMARY KEY,
+    info_hash  TEXT    NOT NULL UNIQUE,
+    kind       TEXT    NOT NULL,
+    tmdb_id    INTEGER NOT NULL,
+    name       TEXT,
+    magnet     TEXT,
+    status     TEXT    NOT NULL DEFAULT 'resolving'
+               CHECK (status IN ('resolving', 'probing', 'done', 'error')),
+    error      TEXT,
+    warnings   TEXT    NOT NULL DEFAULT '[]', -- JSON array of strings
+    user_id    INTEGER REFERENCES users (id) ON DELETE SET NULL,
+    created_at TEXT    NOT NULL,
+    updated_at TEXT    NOT NULL
+);
+CREATE INDEX torrent_jobs_media ON torrent_jobs (kind, tmdb_id);
+
 CREATE TABLE audit_log (
     id         INTEGER PRIMARY KEY,
     user_id    INTEGER REFERENCES users (id) ON DELETE SET NULL,
