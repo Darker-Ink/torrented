@@ -16,6 +16,10 @@ its cached pieces.
 
 It's one binary. Run it, open the browser, finish the setup wizard.
 
+<p align="center">
+  <img src="docs/screenshots/home.jpg" alt="The home page: a featured title and a Continue Watching row" />
+</p>
+
 ## Features
 
 - **Streaming from the swarm** – seekable HTTP streams backed by
@@ -53,6 +57,29 @@ It's one binary. Run it, open the browser, finish the setup wizard.
   Both are versioned and migrate themselves; older library exports are
   upgraded on import.
 
+## Screenshots
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/title.jpg" alt="A show's page with its episodes" /><br /><sub>Shows list their episodes by season, with what's available to stream</sub></td>
+    <td width="50%"><img src="docs/screenshots/movie.jpg" alt="A movie's page" /><br /><sub>Every title gets artwork, cast and details from TMDB</sub></td>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/player.jpg" alt="The player with captions" /><br /><sub>The player, with captions from subtitle files or tracks inside MKVs</sub></td>
+    <td><img src="docs/screenshots/player-settings.jpg" alt="The player's settings menu" /><br /><sub>Speed, subtitles, audio track and version are a click away</sub></td>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/player-menu.jpg" alt="The player's right-click menu" /><br /><sub>Right-click for loop, shareable links, picture-in-picture and stats</sub></td>
+    <td><img src="docs/screenshots/discover.jpg" alt="The discover page" /><br /><sub>Discover trending titles to add or request</sub></td>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/requests.jpg" alt="Requests with automatic torrent reviews" /><br /><sub>Requests can come with a torrent, which is checked automatically</sub></td>
+    <td><img src="docs/screenshots/admin.jpg" alt="The admin overview" /><br /><sub>The admin overview: library, stream cache and who's watching</sub></td>
+  </tr>
+</table>
+
+<sub>Video: <a href="https://peach.blender.org/">Big Buck Bunny</a> © Blender Foundation, CC BY 3.0. Artwork and metadata: <a href="https://www.themoviedb.org/">TMDB</a>.</sub>
+
 ## Running
 
 ### Docker
@@ -73,6 +100,10 @@ the `build: .` line uncommented, or `docker build -t torrented .`.
 
 Both are set up in **Admin → VPN & seedbox**, which also has a *Check IP*
 button showing the address peers see next to the server's own.
+
+<p align="center">
+  <img src="docs/screenshots/vpn-seedbox.jpg" width="720" alt="The VPN and seedbox settings page" />
+</p>
 
 | VPN mode | What it does |
 | --- | --- |
@@ -170,6 +201,8 @@ server/            Rust backend (axum, librqbit, sqlx/SQLite)
   migrations/media media.db schema versions
   src/torrents     engine, release-name parser, scanning and episode matching
   src/streaming    range streaming, ffprobe/ffmpeg, subtitles
+  src/network      VPN routing and the built-in WireGuard tunnel
+  src/seedbox      TorBox client
   src/routes       HTTP API
 web/               React app (Vite, Tailwind, Headless UI)
   src/pages        file-based routes (vite-plugin-pages)
@@ -177,4 +210,5 @@ web/               React app (Vite, Tailwind, Headless UI)
 vendor/            patched librqbit (stream-only mode) and
                    librqbit-dualstack-sockets (IPv4 fallback)
 docker/            Dockerfile used by CI to package prebuilt binaries
+docs/screenshots/  images used in this README
 ```
